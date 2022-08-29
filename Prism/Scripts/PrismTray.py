@@ -42,6 +42,7 @@ if sys.version[0] == "3":
     sys.path.append(os.path.dirname(__file__))
 
 if __name__ == "__main__":
+    #print("es main")
     import PrismCore
 
 if platform.system() == "Windows":
