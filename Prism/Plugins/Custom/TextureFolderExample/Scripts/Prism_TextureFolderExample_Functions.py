@@ -55,7 +55,7 @@ class Prism_TextureFolderExample_Functions(object):
         # See the "onAssetDlgOpen" and "onAssetCreated" functions in this script for the details
         # Uncomment the following line to enable the texture folder creation. Then you need to save the file and reload the plugin by restarting your Prism application or calling the "reloadCustomPlugins" function of the PrismCore object.
 
-        # self.textureFolders = True
+        self.textureFolders = True
 
     # if returns true, the plugin will be loaded by Prism
     @err_catcher(name=__name__)
