@@ -1,4 +1,4 @@
 *.pyc
-#Prism/Python37/
-#Prism/PythonLibs/
-#Prism/Tools/
+Prism/Python37/
+Prism/PythonLibs/
+Prism/Tools/
