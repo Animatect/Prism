@@ -74,6 +74,7 @@ class Prism_TestPluginA_Functions(object):
         print(type(type(origin)))
         #print(origin.size)
         origin.resize(700, 870)
+        
         pass
 
     @err_catcher(name=__name__)
