@@ -104,6 +104,27 @@
             },
         },
     },
+     Action
+    {
+        ID = "6_StateManager",
+        Category = "Prism",
+        Name = "6 StateManager",
+
+        Targets =
+        {
+            Composition =
+            {
+                Execute = _Lua [=[
+                    local scriptPath = app:MapPath("Scripts:Prism/6 StateManager.py")
+                    if bmd.fileexists(scriptPath) == false then
+                        print("[Prism Error] Can't run file: " .. scriptPath)
+                    else
+                        target:RunScript(scriptPath)
+                    end
+                ]=],
+            },
+        },
+    },
     Menus
     {
         Target = "ChildFrame",
@@ -118,6 +139,7 @@
                 "3_Project_Browser{}",
                 "4_Update_selected_load_nodes{}",
                 "5_Settings{}",
+                "6_StateManager{}",
             },
         },
     },

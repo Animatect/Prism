@@ -30,6 +30,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Prism.  If not, see <https://www.gnu.org/licenses/>.
 
+
+#Éste script va a instalar y desinstalar Prisma en Fusion.
+
 import os
 import sys
 import platform
@@ -111,7 +114,8 @@ class Prism_Fusion_Integration(object):
 
                 shutil.copy2(origFile, targetFile)
                 addedFiles.append(targetFile)
-
+                
+                #Se asigna el path local de prism a un placeholder que hay en los archivos.
                 with open(targetFile, "r") as init:
                     initStr = init.read()
                     initStr = initStr.replace(
@@ -122,6 +126,7 @@ class Prism_Fusion_Integration(object):
                 with open(targetFile, "w") as init:
                     init.write(initStr)
 
+            #PrismInit.scriptlib se pone en Scripts de fusion
             for i in ["PrismInit.scriptlib"]:
                 origFile = os.path.join(integrationBase, i)
                 targetFile = os.path.join(installPath, "Scripts", i)
@@ -138,20 +143,23 @@ class Prism_Fusion_Integration(object):
 
                 with open(targetFile, "r") as init:
                     initStr = init.read()
-
+                
+                #a la copia en fusion se le da el path de prisma
                 with open(targetFile, "w") as init:
                     initStr = initStr.replace(
                         "PRISMROOT", '"%s"' % self.core.prismRoot.replace(
                             "\\", "/")
                     )
                     init.write(initStr)
-
+            
+            #Se copian todos los siguientes archivos a los scripts de Fusion
             for i in [
                 "1 Save Version.py",
                 "2 Save Comment.py",
                 "3 Project Browser.py",
                 "4 Update selected load nodes.py",
                 "5 Settings.py",
+                "6 StateManager.py",
                 "open in explorer.py",
                 "refresh location.py",
                 "refresh writer.py",
@@ -173,14 +181,15 @@ class Prism_Fusion_Integration(object):
 
                 with open(targetFile, "r") as init:
                     initStr = init.read()
-
+                #a la copia en fusion se le da el path de prisma
                 with open(targetFile, "w") as init:
                     initStr = initStr.replace(
                         "PRISMROOT", '"%s"' % self.core.prismRoot.replace(
                             "\\", "/")
                     )
                     init.write(initStr)
-
+            
+            #Se agregan los settings en la carpeta de Macros
             for i in ["WritePrism.setting"]:
                 origFile = os.path.join(integrationBase, i)
                 targetFile = os.path.join(installPath, "Macros", i)
@@ -197,7 +206,7 @@ class Prism_Fusion_Integration(object):
 
                 with open(targetFile, "r") as init:
                     initStr = init.read()
-
+                #a la copia en fusion se le da el path de prisma
                 with open(targetFile, "w") as init:
                     initStr = initStr.replace(
                         "PRISMROOT", '"%s"' % self.core.prismRoot.replace(
@@ -263,6 +272,9 @@ class Prism_Fusion_Integration(object):
             )
             pFiles.append(
                 os.path.join(installPath, "Scripts", "Prism", "5 Settings.py")
+            )
+            pFiles.append(
+                os.path.join(installPath, "Scripts", "Prism", "6 StateManager.py")
             )
             pFiles.append(
                 os.path.join(installPath, "Scripts",

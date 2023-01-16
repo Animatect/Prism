@@ -179,6 +179,7 @@ class TimeMeasure(object):
 # Prism core class, which holds various functions
 class PrismCore:
     def __init__(self, app="Standalone", prismArgs=[]):
+        #prismIni is asignedin PrismUtils/Projects
         self.prismIni = ""
 
         try:

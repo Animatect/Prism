@@ -31,18 +31,41 @@
 # along with Prism.  If not, see <https://www.gnu.org/licenses/>.
 
 
-class Prism_Fusion_Variables(object):
-    def __init__(self, core, plugin):
-        self.version = "v1.3.0.0"
-        self.pluginName = "Fusion"
-        self.pluginType = "App"
-        self.appShortName = "Fusion"
-        self.appType = "3d"
-        self.hasQtParent = False
-        self.sceneFormats = [".comp"]
-        self.outputFormats = [".fbx", ".comp", "ShotCam"]
-        self.appSpecificFormats = self.sceneFormats
-        self.appColor = [134, 96, 166]
-        self.preferredUnit = "meter"
-        self.appVersionPresets = ["16"]
-        self.platforms = ["Windows", "Linux", "Darwin"]
+import os
+import sys
+
+prismRoot = os.getenv("PRISM_ROOT")
+if not prismRoot:
+    prismRoot = "C:\\GitHub\\Prism\\Prism"
+
+sys.path.append(os.path.join(prismRoot, "Scripts"))
+sys.path.append(os.path.join(prismRoot, "PythonLibs", "Python27", "PySide"))
+sys.path.append(os.path.join(prismRoot, "PythonLibs", "Python37", "PySide"))
+
+
+
+try:
+    from PySide2.QtCore import *
+    from PySide2.QtGui import *
+    from PySide2.QtWidgets import *
+except:
+    from PySide.QtCore import *
+    from PySide.QtGui import *
+
+qapp = QApplication.instance()
+if qapp == None:
+    qapp = QApplication(sys.argv)
+
+
+import PrismCore
+
+pcore = PrismCore.PrismCore(app="Fusion")
+pcore.appPlugin.fusion = fusion
+
+curPrj = pcore.getConfig("globals", "current project")
+if curPrj is not None and curPrj != "":
+    pcore.changeProject(curPrj, openUi="stateManager", settingsTab=0)
+else:
+    pcore.stateManager()
+
+qapp.exec_()

@@ -32,6 +32,8 @@
 
 
 import os
+import json
+import time
 
 try:
     from PySide2.QtCore import *
@@ -586,3 +588,327 @@ class Prism_Fusion_Functions(object):
 
             comp = self.fusion.GetCurrentComp()
             comp.Execute(luacode)
+
+##################################################
+##################### EXPORT #####################
+##################################################
+
+    @err_catcher(name=__name__)
+    def getNodeName(self, origin, node):
+        if self.isNodeValid(origin, node):
+            try:
+                return node["name"]
+            except:
+                QMessageBox.warning(
+                    self.core.messageParent, "Warning", "Cannot get name from %s" % node
+                )
+                return node
+        else:
+            return "invalid"
+
+    @err_catcher(name=__name__)
+    def selectNodes(self, origin):
+        if origin.lw_objects.selectedItems() != []:
+            nodes = []
+            for i in origin.lw_objects.selectedItems():
+                node = origin.nodes[origin.lw_objects.row(i)]
+                if self.isNodeValid(origin, node):
+                    nodes.append(node)
+           
+
+    @err_catcher(name=__name__)
+    def isNodeValid(self, origin, handle):
+        #Validar que los nodos que seleccionemos sean objetos exportables
+        obj = self.getObject(handle)
+        return obj.ID == "Merge3D"
+    
+    @err_catcher(name=__name__)
+    def sm_export_exportShotcam(self, origin, startFrame, endFrame, outputName):
+        result = self.sm_export_exportAppObjects(
+            origin,
+            startFrame,
+            endFrame,
+            (outputName + ".abc"),
+            nodes=[origin.curCam],
+            expType=".abc",
+        )
+        result = self.sm_export_exportAppObjects(
+            origin,
+            startFrame,
+            endFrame,
+            (outputName + ".fbx"),
+            nodes=[origin.curCam],
+            expType=".fbx",
+        )
+        return result
+
+    @err_catcher(name=__name__)
+    def sm_export_exportAppObjects(
+        self,
+        origin,
+        startFrame,
+        endFrame,
+        outputName,
+        scaledExport=False,
+        nodes=None,
+        expType=None,
+    ):
+        comp = self.fusion.GetCurrentComp()
+        #Tomemos los nodos que están en la lista
+        expNodes = origin.nodes
+        
+        #Seleccionemos los nodos elegidos en la lista
+        #recordemos que en la lista hay guardados definiciones de nodos de Fusion.
+        #loopeamos por todos los nodos seleccionados
+        for i in expNodes:            
+            #chequemos cual es el formato de salida
+            outType = origin.getOutputType()
+
+            #Manejamos el export de acuerdo a el formato de salida.
+            if outType == ".fbx":
+                #Checamos si hay que bakear anim (para FBX no es necesario)
+                useAnim = startFrame != endFrame
+                #bloqueamos la comp para que no salgan ventanas emergentes
+                comp.Lock()
+
+                #toolName = i.Name
+                #El node guardado en el stateManager tiene el formato {name: "nombre"} getObject nos da el objeto
+                activeNode = self.getObject(i)
+                flow = comp.CurrentFrame.FlowView
+                #Tiene un objeto asignado a ActiveNode o no
+                if activeNode:                    
+                    #por cada nodo extraemos su posición
+                    x, y = flow.GetPosTable(activeNode).values()                    
+                    #creamos el FBXExport en la posición correspondiente.
+                    exporter = comp.AddTool("ExporterFBX",x+2,y-1)
+
+                    exporter.Filename = outputName
+                    #exporter.ScaleFusionUnitsBy = 10.0
+
+                    exporter.Input.ConnectTo(activeNode.Output)
+                    comp.Render({'Tool':exporter, 'Start':startFrame, 'End':endFrame, 'Wait':True})
+                    interval = 3
+                    time.sleep(interval)
+                    exporter.Delete()
+                else:
+                    #ThrowError
+                    pass
+                #Desbloqueamos la comp.
+                comp.Unlock()
+        
+        #Seleccionar los FBX nodes
+
+        #Retornar el nombre de archivo.
+        #Si el nombre es outputName = "Canceled" default export cancela la operacion y arroja error.
+        return outputName
+
+    @err_catcher(name=__name__)
+    def sm_export_preDelete(self, origin):
+        pass
+
+    @err_catcher(name=__name__)
+    def sm_export_startup(self, origin):
+        if origin.className == "Export":
+            print(dir(origin))
+            #origin.l_convertExport.setText("Additional export in centimeters:")
+            #origin.chb_convertExport.deleteLater()
+            origin.chb_convertExport.setVisible(False)
+            origin.chb_wholeScene.setVisible(False)
+            origin.l_convertExport.setVisible(False)
+            origin.w_additionalOptions.setVisible(False)
+
+    #########################################################################
+    # sm_export_updateObjects y sm_export_addObjects tienen código repetido #
+    # se pueden refactorizar                                                #
+    #########################################################################
+
+    @err_catcher(name=__name__)
+    def updateList(self, origin):
+        comp = self.fusion.GetCurrentComp()
+        nodes = origin.nodes
+        origin.nodes = []
+        isobjactive = True
+        try:
+            actobj = comp.ActiveTool()
+        except Exception:
+            actobj = None
+        if actobj:
+            #print(len(nodes))
+            if len(nodes) > 0:
+                if actobj.Name != nodes[0]["name"]:
+                    nodes = [self.getNode(actobj)]
+            else:
+                nodes = [self.getNode(actobj)]
+        else:
+            isobjactive = False
+
+        origin.nodes = nodes
+        return isobjactive
+
+    @err_catcher(name=__name__)
+    def sm_export_updateObjects(self, origin):
+        #comp = self.fusion.GetCurrentComp()
+        #nodes = origin.nodes
+        #nodesnames = [n["name"] for n in nodes]
+        #print(nodesnames)
+        #origin.nodes = []
+        #objects = list(comp.GetToolList(True).values())
+
+        #for i in nodes:
+        #    if i["name"] not in nodesnames:
+        #        print("Soy")
+        #        print(i["name"])
+        #        nodes.append(self.getNode(i["name"]))
+        #        nodesnames.append(i["name"])
+        #for i in objects:
+        #    if i["name"] not in nodesnames:
+        #        nodes.append(self.getNode(i))
+        #print(nodesnames)
+
+        #Cada Export debería ser un sólo nodo
+        self.updateList(origin)
+
+    @err_catcher(name=__name__)
+    def getCamNodes(self, origin, cur=False):
+        comp = self.fusion.GetCurrentComp()
+        return [x.Name for x in comp.GetToolList().values() if x.ID == "Camera3D"]
+    
+    @err_catcher(name=__name__)
+    def getCamName(self, origin, handle):
+        return handle
+
+    @err_catcher(name=__name__)
+    def sm_export_addObjects(self, origin, objects=None):
+        #print("sm_export_addObjects")
+        #comp = self.fusion.GetCurrentComp()
+        #nodes = origin.nodes
+        #nodesnames = [n["name"] for n in nodes]
+
+        #si objects no es None (no es falso)
+        #if not objects:
+            # get selected objects from scene
+        #    objects = list(comp.GetToolList(True).values())
+        #for i in objects:
+        #    if i.Name not in nodesnames:
+        #        origin.nodes.append(self.getNode(i))
+
+        gate = self.updateList(origin)                
+        if not gate:
+            QMessageBox.warning(
+                self.core.messageParent, 
+                "Warning", 
+                "No hay nodos activos en la comp \n Selecciona un nodo y asegurate que este activo",
+            )
+
+        origin.updateUi()
+        origin.stateManager.saveStatesToScene()
+
+    
+    @err_catcher(name=__name__)
+    def sm_export_preExecute(self, origin, startFrame, endFrame):
+        warnings = []
+
+        outType = origin.getOutputType()
+
+        if outType != "ShotCam":
+            if (
+                outType == ".Comp"
+            ):
+                warnings.append(
+                    [
+                        "El Export de .Comp files aún no está implementado",
+                        "Copia y pega los nodos deseados como de costumbre.",
+                    ]
+                )
+
+        return warnings
+
+    @err_catcher(name=__name__)
+    def clearActiveTool(self):
+        comp = self.fusion.GetCurrentComp()
+        comp.SetActiveTool(None)
+
+    @err_catcher(name=__name__)
+    def sm_export_removeSetItem(self, origin, node):
+        self.clearActiveTool()
+
+    @err_catcher(name=__name__)
+    def sm_export_clearSet(self, origin):
+        self.clearActiveTool()
+
+    ##Dentro de Fusion necesitamos trabajar con objetos,
+    ##Pero Prisma necesita data más genérica como Strings o diccionarios 
+    ##para guardarlas en la data del state manager como "connectednodes"
+    #Estas dos funciones convierten data de prisma a objetos de Fusion. 
+
+    @err_catcher(name=__name__)
+    def getNode(self, obj):
+        if type(obj) == str:
+            node = {"name": obj}
+        elif type(obj) == dict:
+            node = {"name": obj["name"]}
+        else:
+            node = {"name": obj.Name}
+        return node
+
+    @err_catcher(name=__name__)
+    def getObject(self, node):
+        comp = self.fusion.GetCurrentComp()
+        if type(node) == str:
+            node = self.getNode(node)
+
+        return comp.FindTool(node["name"])
+
+    #######################################################################
+
+    ###STATE MANAGER STUFF####
+
+    @err_catcher(name=__name__)
+    def sm_getExternalFiles(self, origin):
+        extFiles = []
+        return [extFiles, []]
+
+    @err_catcher(name=__name__)
+    def getFusionStatesFilePath(self):
+        comp = self.fusion.GetCurrentComp()
+        file_name = 'PrismStates.txt'        
+        #file_name = 'PrismStates.json'
+        file_path = comp.GetAttrs()["COMPS_FileName"]
+        abs_path = os.path.abspath(file_path)
+        file_dir = os.path.dirname(abs_path)
+        newfile_path = os.path.join(file_dir,file_name)
+
+        return newfile_path
+
+    @err_catcher(name=__name__)
+    def sm_saveStates(self, origin, buf):
+        prismstates = self.getFusionStatesFilePath()
+
+        file_dir = os.path.dirname(prismstates)
+        if not os.path.exists(file_dir):
+            os.makedirs(file_dir)
+        with open(prismstates, "w") as file:
+            #json.dump(buf, file)
+            file.write(buf)
+
+    @err_catcher(name=__name__)
+    def sm_saveImports(self, origin, importPaths):
+        #bpy.context.scene["PrismImports"] = importPaths.replace("\\\\", "\\")
+        pass
+
+    @err_catcher(name=__name__)
+    def sm_readStates(self, origin):
+        prismstates = self.getFusionStatesFilePath()
+        
+        if os.path.exists(prismstates):
+            with open(prismstates, "r") as file:
+                file_contents = str(file.read())
+                #print(file_contents)
+                return file_contents
+                #return json.load(file)
+
+    @err_catcher(name=__name__)
+    def sm_deleteStates(self, origin):
+        prismstates = self.getFusionStatesFilePath()
+        if os.path.exists(prismstates):
+                os.remove(prismstates)
