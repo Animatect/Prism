@@ -709,7 +709,7 @@ class Prism_Fusion_Functions(object):
     @err_catcher(name=__name__)
     def sm_export_startup(self, origin):
         if origin.className == "Export":
-            print(dir(origin))
+            #print(dir(origin))
             #origin.l_convertExport.setText("Additional export in centimeters:")
             #origin.chb_convertExport.deleteLater()
             origin.chb_convertExport.setVisible(False)
@@ -718,8 +718,6 @@ class Prism_Fusion_Functions(object):
             origin.w_additionalOptions.setVisible(False)
 
     #########################################################################
-    # sm_export_updateObjects y sm_export_addObjects tienen código repetido #
-    # se pueden refactorizar                                                #
     #########################################################################
 
     @err_catcher(name=__name__)
@@ -862,7 +860,7 @@ class Prism_Fusion_Functions(object):
     #######################################################################
 
     ###STATE MANAGER STUFF####
-
+    
     @err_catcher(name=__name__)
     def sm_getExternalFiles(self, origin):
         extFiles = []
@@ -883,7 +881,7 @@ class Prism_Fusion_Functions(object):
     @err_catcher(name=__name__)
     def sm_saveStates(self, origin, buf):
         prismstates = self.getFusionStatesFilePath()
-
+        
         file_dir = os.path.dirname(prismstates)
         if not os.path.exists(file_dir):
             os.makedirs(file_dir)

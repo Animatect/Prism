@@ -40,7 +40,7 @@ class Prism_Fusion_Variables(object):
         self.appType = "3d"
         self.hasQtParent = False
         self.sceneFormats = [".comp"]
-        self.outputFormats = [".fbx", ".comp", "ShotCam"]
+        self.outputFormats = [".fbx", "ShotCam"]
         self.appSpecificFormats = self.sceneFormats
         self.appColor = [134, 96, 166]
         self.preferredUnit = "meter"
