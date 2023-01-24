@@ -34,6 +34,7 @@
 import os
 import json
 import time
+import sys
 
 try:
     from PySide2.QtCore import *
@@ -83,6 +84,8 @@ class Prism_Fusion_Functions(object):
             ).replace("\\", "/")
             + "/",
         )
+
+        
         # ssheet = ssheet.replace("#c8c8c8", "rgb(47, 48, 54)").replace("#727272", "rgb(40, 40, 46)").replace("#5e90fa", "rgb(70, 85, 132)").replace("#505050", "rgb(33, 33, 38)")
         # ssheet = ssheet.replace("#a6a6a6", "rgb(37, 39, 42)").replace("#8a8a8a", "rgb(37, 39, 42)").replace("#b5b5b5", "rgb(47, 49, 52)").replace("#999999", "rgb(47, 49, 52)")
         # ssheet = ssheet.replace("#9f9f9f", "rgb(31, 31, 31)").replace("#b2b2b2", "rgb(31, 31, 31)").replace("#aeaeae", "rgb(35, 35, 35)").replace("#c1c1c1", "rgb(35, 35, 35)")
@@ -589,9 +592,11 @@ class Prism_Fusion_Functions(object):
             comp = self.fusion.GetCurrentComp()
             comp.Execute(luacode)
 
-##################################################
-##################### EXPORT #####################
-##################################################
+################################################
+#                                              #
+#                    EXPORT                    #
+#                                              #
+################################################
 
     @err_catcher(name=__name__)
     def getNodeName(self, origin, node):
@@ -619,8 +624,13 @@ class Prism_Fusion_Functions(object):
     @err_catcher(name=__name__)
     def isNodeValid(self, origin, handle):
         #Validar que los nodos que seleccionemos sean objetos exportables
-        obj = self.getObject(handle)
-        return obj.ID == "Merge3D"
+        #print(origin.className)
+        if origin.className == "Export":
+            obj = self.getObject(handle)
+            return obj.ID == "Merge3D"
+        elif origin.className == "ImportFile":
+            #print("Importando")
+            return True
     
     @err_catcher(name=__name__)
     def sm_export_exportShotcam(self, origin, startFrame, endFrame, outputName):
@@ -833,6 +843,247 @@ class Prism_Fusion_Functions(object):
     @err_catcher(name=__name__)
     def sm_export_clearSet(self, origin):
         self.clearActiveTool()
+
+    ################################################
+    #                                              #
+    #                    IMPORT                    #
+    #                                              #
+    ################################################
+    abc_options = {
+        "Points": True,
+        "Transforms": True,
+        "Hierarchy": False,
+        "Lights": True,
+        "Normals": True,
+        "Meshes": True,
+        "UVs": True,
+        "Cameras": True,
+        "InvCameras": True
+        # "SamplingRate": 24
+    }
+
+    @err_catcher(name=__name__)
+    def importFormatByUI(self, origin, formatCall, filepath, global_scale, options = None, interval = 1):
+        #sys.path.append(self.core.prismRoot+"\\PythonLibs\\Python27\\")
+        print("PrismRoot= "+ self.core.prismRoot)
+        origin.stateManager.showMinimized()
+        sys.path.append(self.core.prismRoot + '/PythonLibs/Python27')
+        import pyautogui
+
+        fusion = self.fusion
+        comp = fusion.CurrentComp
+        #comp.Lock()
+        flow = comp.CurrentFrame.FlowView
+        flow.Select(None)
+
+        if not os.path.exists(filepath):
+            QMessageBox.warning(
+                self.core.messageParent, "Warning", "File %s does not exists" % filepath
+            )
+
+        if formatCall == "AbcImport" and isinstance(options, dict):
+            current = fusion.GetPrefs("Global.Alembic.Import")
+            new = current.copy()
+            for key, value in options.items():
+                if key in current:
+                    new[key] = value
+                else:
+                    print("Invalid option %s:" % key)
+            fusion.SetPrefs("Global.Alembic.Import", new)
+
+        fusion.QueueAction("Utility_Show", {"id":formatCall})
+
+
+        pyautogui.typewrite(filepath)
+        pyautogui.press("enter")
+        pyautogui.press("enter")
+        time.sleep(interval)
+
+        origin.stateManager.showNormal()
+        #comp.Unlock()
+
+        #return comp.GetToolList(True).values()
+
+    @err_catcher(name=__name__)
+    def sm_import_startup(self, origin):
+        origin.b_browse.setMinimumWidth(50 * self.core.uiScaleFactor)
+        origin.b_browse.setMaximumWidth(50 * self.core.uiScaleFactor)
+        origin.f_abcPath.setVisible(False)
+        origin.f_unitConversion.setVisible(False)
+        origin.l_preferUnit.setText("Prefer versions in cm:")
+
+    @err_catcher(name=__name__)
+    def sm_import_disableObjectTracking(self, origin):
+        self.deleteNodes(origin, [origin.setName])
+
+    @err_catcher(name=__name__)
+    def sm_import_importToApp(self, origin, doImport, update, impFileName):
+        #print(impFileName)
+        comp = self.fusion.GetCurrentComp()
+        flow = comp.CurrentFrame.FlowView
+        #default_importfile.py llama a ésta función pasándole el nombre del archivo a importar
+        fileName = os.path.splitext(os.path.basename(impFileName))
+        origin.setName = ""
+        result = False
+        activetool = None
+        try:
+            activetool = comp.ActiveTool()
+        except:
+            pass
+        
+        ext = fileName[1].lower()
+        #Si el formato no es un formato reconocible entonces no es importable
+        if ext not in [".fbx",".abc"]:
+            self.core.popup("Format is not supported.")
+            return {"result": False, "doImport": doImport}
+        #se refiere a chbx al lado de:Update path only (if exists)
+        # if not (ext == ".abc" and origin.chb_abcPath.isChecked()):
+        #     origin.preDelete(
+        #         baseText="Do you want to delete the currently connected objects?\n\n"
+        #     )
+
+        #Vamos a agarrar todos los nodos de la escena a ver si hay que reemplazar alguno        
+        existingNodes = [n.Name for n in comp.GetToolList().values()]
+        if ext == ".fbx":
+            self.importFormatByUI(origin = origin, formatCall="FBXImport", filepath=impFileName,global_scale=100)
+        elif ext == ".abc":
+            self.importFormatByUI(origin = origin, formatCall="AbcImport", filepath=impFileName,global_scale=100, options = self.abc_options)
+
+        #Agarramos los nodos importados y los hacemos relativos al active node.
+        if activetool is not None:
+            print("locs")
+            impnodes = [n for n in comp.GetToolList(True).values()]
+            print(impnodes)
+            if len(impnodes) > 0:
+                comp.Lock()
+                fisrtnode = impnodes[0]
+                fstnx = flow.GetPosTable(fisrtnode).values()[0]
+                fstny = flow.GetPosTable(fisrtnode).values()[1]
+                for n in impnodes:
+                    print("locs")
+                    atx = flow.GetPosTable(activetool).values()[0]
+                    aty = flow.GetPosTable(activetool).values()[1]
+                    x = flow.GetPosTable(n).values()[0]
+                    y = flow.GetPosTable(n).values()[1]
+                    offset = [x-fstnx,y-fstny]
+                    newx = x+(atx-x)+offset[0]
+                    newy = y+(aty-y)+offset[1]
+                    flow.SetPos(n, newx, newy)
+                comp.Unlock()
+
+        #vemos si hay que reemplazar nodos en la comp
+        newNodes = [n.Name for n in comp.GetToolList(True).values()]
+        importedNodes = []
+        for i in newNodes:
+            #si tiene el patrón de un nodo duplicado reemplazamos el nodo anterior
+            #if i.endswith("_1"):
+            # if i[-1].isdigit(): 
+            #     digit = int(i[-1]) - 1
+            #     if digit > 0:
+            #         tmpname = i[:-1] + str(digit)
+            #         if tmpname in existingNodes:
+            #             oldnode = comp.FindTool(tmpname)
+            #             newnode = comp.FindTool(i)
+            #             x = flow.GetPosTable(oldnode).values()[0]
+            #             y = flow.GetPosTable(oldnode).values()[1]
+
+            #             flow.SetPos(newnode, x, y)
+            #             oldnode.Delete()
+            #             newnode.Name = tmpname 
+            #             importedNodes.append(self.getNode(tmpname))
+            #         else:
+            #             importedNodes.append(self.getNode(i))
+            # else:
+            #     importedNodes.append(self.getNode(i))
+            importedNodes.append(self.getNode(i))
+
+        origin.setName = "Import_" + fileName[0]
+        # extension = 1
+        # while origin.setName in self.getGroups() and extension < 999:
+        #     if "%s_%s" % (origin.setName, extension) not in self.getGroups():
+        #         origin.setName += "_%s" % extension
+        #     extension += 1
+
+        #if origin.chb_trackObjects.isChecked():
+        origin.nodes = importedNodes
+        #Deseleccionar todo
+        flow.Select()
+
+        objs = [self.getObject(x) for x in importedNodes]
+
+        for o in objs:
+            flow.Select(o)
+
+        result = len(importedNodes) > 0
+        print(importedNodes)
+        return {"result": result, "doImport": doImport}
+        
+
+    # @err_catcher(name=__name__)
+    # def sm_import_updateObjects(self, origin):
+    #     if origin.setName == "":
+    #         return
+
+    #     origin.nodes = []
+    #     if origin.setName in self.getGroups() and origin.chb_trackObjects.isChecked():
+    #         group = self.getGroups()[origin.setName]
+    #         nodes = []
+    #         for obj in group.objects:
+    #             if not obj.users_scene:
+    #                 group.objects.unlink(obj)
+    #                 continue
+
+    #             nodes.append(self.getNode(obj))
+
+    #         origin.nodes = nodes
+
+    @err_catcher(name=__name__)
+    def sm_import_removeNameSpaces(self, origin):
+        for i in origin.nodes:
+            if not self.getObject(i):
+                continue
+
+            nodeName = self.getNodeName(origin, i)
+            newName = nodeName.rsplit(":", 1)[-1]
+            if newName != nodeName and not i["library"]:
+                self.getObject(i).name = newName
+
+        origin.updateUi()
+
+    # @err_catcher(name=__name__)
+    # def sm_import_unitConvert(self, origin):
+    #     if origin.taskName == "ShotCam" and len(origin.nodes) == 1:
+    #         prevObjs = list(bpy.context.scene.objects)
+    #         bpy.ops.object.empty_add(type="PLAIN_AXES")
+    #         empObj = [x for x in bpy.context.scene.objects if x not in prevObjs][0]
+    #         empObj.name = "UnitConversion"
+    #         empObj.location = [0, 0, 0]
+
+    #         self.getObject(origin.nodes[0]).parent = empObj
+    #         sVal = 0.01
+    #         empObj.scale = [sVal, sVal, sVal]
+
+    #         bpy.ops.object.select_all(
+    #             self.getOverrideContext(origin), action="DESELECT"
+    #         )
+    #         self.selectObject(self.getObject(origin.nodes[0]))
+    #         bpy.ops.object.parent_clear(
+    #             self.getOverrideContext(origin), type="CLEAR_KEEP_TRANSFORM"
+    #         )
+
+    #         bpy.ops.object.select_all(
+    #             self.getOverrideContext(origin), action="DESELECT"
+    #         )
+    #         self.selectObject(empObj)
+    #         bpy.ops.object.delete(self.getOverrideContext(origin))
+
+    @err_catcher(name=__name__)
+    def sm_import_fixImportPath(self, filepath):
+        return filepath.replace("\\\\", "\\")
+
+    @err_catcher(name=__name__)
+    def sm_import_updateUi(self, origin):
+        origin.f_unitConversion.setVisible(origin.taskName == "ShotCam")
 
     ##Dentro de Fusion necesitamos trabajar con objetos,
     ##Pero Prisma necesita data más genérica como Strings o diccionarios 
