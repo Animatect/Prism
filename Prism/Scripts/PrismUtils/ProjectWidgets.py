@@ -46,12 +46,20 @@ from UserInterfacesPrism import CreateProject_ui
 
 
 class CreateProject(QDialog, CreateProject_ui.Ui_dlg_createProject):
-    def __init__(self, core):
+    def __init__(self, core, name=None, path=None, settings=None):
         QDialog.__init__(self)
         self.core = core
         self.prevName = ""
         if self.core.uiAvailable:
             self.loadLayout()
+            if name:
+                self.e_name.setText(name)
+
+            if path:
+                self.e_path.setText(path)
+
+            if settings:
+                self.settingsApplied(settings)
 
         self.enableCleanup = True
         self.core.callback(
@@ -863,19 +871,26 @@ class ProjectCreated(QDialog):
         self.lo_main = QVBoxLayout()
         self.lo_main.setSpacing(50)
         self.setLayout(self.lo_main)
-        msg = 'The project "%s" was created successfully!' % self.prjname
+        msg = "Project <b>%s</b> was created successfully!" % self.prjname
         self.l_success = QLabel(msg)
         self.l_icon = QLabel()
         headerPath = os.path.join(
             self.core.prismRoot, "Scripts", "UserInterfacesPrism", "check.png"
         )
-        pmap = self.core.media.getPixmapFromPath(headerPath)
-        self.l_icon.setPixmap(pmap)
-        self.l_icon.setAlignment(Qt.AlignHCenter)
+        icon = self.core.media.getColoredIcon(headerPath, r=29, g=191, b=106, force=True)
+        self.l_icon.setPixmap(icon.pixmap(60, 60))
+        self.l_icon.setAlignment(Qt.AlignCenter)
+        self.w_buttons = QWidget()
+        self.lo_buttons = QHBoxLayout(self.w_buttons)
         self.b_browser = QPushButton("Open Project Browser")
+        self.b_explorer = QPushButton("Open in Explorer")
         self.lo_main.addWidget(self.l_success)
         self.lo_main.addWidget(self.l_icon)
-        self.lo_main.addWidget(self.b_browser)
+        self.lo_buttons.addStretch()
+        self.lo_buttons.addWidget(self.b_browser)
+        self.lo_buttons.addWidget(self.b_explorer)
+        self.lo_buttons.addStretch()
+        self.lo_main.addWidget(self.w_buttons)
         self.core.parentWindow(self)
         self.setFocus()
 
@@ -883,6 +898,8 @@ class ProjectCreated(QDialog):
     def connectEvents(self):
         self.b_browser.clicked.connect(self.core.projectBrowser)
         self.b_browser.clicked.connect(self.accept)
+        self.b_explorer.clicked.connect(lambda: self.core.openFolder(self.core.projectPath))
+        self.b_explorer.clicked.connect(self.accept)
 
 
 class SetProject(QDialog):
@@ -1235,6 +1252,7 @@ class CreateAssetDlg(PrismWidgets.CreateItem):
         icon = self.core.media.getColoredIcon(iconPath)
         self.buttonBox.buttons()[2].setIcon(icon)
 
+        self.w_item.setContentsMargins(0, 0, 0, 0)
         self.e_item.setFocus()
         self.e_item.setToolTip("Asset name or comma separated list of asset names.\nParent nFolders can be included using slashes.")
         self.l_item.setText("Asset(s):")
@@ -1256,6 +1274,26 @@ class CreateAssetDlg(PrismWidgets.CreateItem):
         self.lo_thumbnail.addWidget(self.l_thumbnailStr)
         self.lo_thumbnail.addWidget(self.l_thumbnail)
         self.layout().insertWidget(self.layout().indexOf(self.buttonBox)-2, self.w_thumbnail)
+
+        self.w_taskPreset = QWidget()
+        self.lo_taskPreset = QHBoxLayout(self.w_taskPreset)
+        self.lo_taskPreset.setContentsMargins(0, 0, 0, 0)
+        self.l_taskPreset = QLabel("Task Preset:")
+        self.chb_taskPreset = QCheckBox()
+        self.cb_taskPreset = QComboBox()
+        self.cb_taskPreset.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.lo_taskPreset.addWidget(self.l_taskPreset)
+        self.lo_taskPreset.addStretch()
+        self.lo_taskPreset.addWidget(self.chb_taskPreset)
+        self.lo_taskPreset.addWidget(self.cb_taskPreset)
+        self.cb_taskPreset.setEnabled(self.chb_taskPreset.isChecked())
+        self.chb_taskPreset.toggled.connect(self.cb_taskPreset.setEnabled)
+        presets = self.core.projects.getAssetTaskPresets()
+        if presets:
+            for preset in presets:
+                self.cb_taskPreset.addItem(preset.get("name", ""), preset)
+
+            self.layout().insertWidget(self.layout().indexOf(self.buttonBox)-2, self.w_taskPreset)
 
         self.l_info = QLabel("Description:")
         self.layout().insertWidget(self.layout().indexOf(self.buttonBox)-2, self.l_info)
@@ -1414,3 +1452,1092 @@ class CreateAssetFolderDlg(PrismWidgets.CreateItem):
         self.e_item.setToolTip("Folder name or comma separated list of folder names.\nParent folders can be included using slashes.")
         self.setWindowTitle("Create Folder...")
         self.l_item.setText("Folder(s):")
+
+
+class CreateProductDlg(QDialog):
+    def __init__(self, origin, entity=None):
+        super(CreateProductDlg, self).__init__()
+        self.parentDlg = origin
+        self.core = self.parentDlg.core
+        self.core.parentWindow(self, parent=self.parentDlg)
+        self.entity = entity
+        self.setupUi_()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        return QSize(300, 150)
+
+    @err_catcher(name=__name__)
+    def setupUi_(self):
+        self.setWindowTitle("Create Product")
+        self.lo_main = QVBoxLayout(self)
+
+        self.w_settings = QWidget()
+        self.lo_settings = QGridLayout(self.w_settings)
+        self.lo_settings.setContentsMargins(0, 9, 0, 9)
+
+        row = 0
+        if self.core.mediaProducts.getLinkedToTasks():
+            self.l_department = QLabel("Department:")
+            self.e_department = QLineEdit()
+            self.e_department.textEdited.connect(lambda x: self.enableOk())
+            self.b_department = QPushButton("▼")
+            self.b_department.setMaximumSize(QSize(25, 16777215))
+            self.b_department.clicked.connect(self.onDepartmentClicked)
+            self.lo_settings.addWidget(self.l_department, row, 0)
+            self.lo_settings.addWidget(self.e_department, row, 1)
+            self.lo_settings.addWidget(self.b_department, row, 2)
+            row += 1
+
+            self.l_task = QLabel("Task:")
+            self.e_task = QLineEdit()
+            self.e_task.textEdited.connect(lambda x: self.enableOk())
+            self.b_task = QPushButton("▼")
+            self.b_task.setMaximumSize(QSize(25, 16777215))
+            self.b_task.clicked.connect(self.onTaskClicked)
+            self.lo_settings.addWidget(self.l_task, row, 0)
+            self.lo_settings.addWidget(self.e_task, row, 1)
+            self.lo_settings.addWidget(self.b_task, row, 2)
+            row += 1
+
+            fileName = self.core.getCurrentFileName()
+            context = self.core.getScenefileData(fileName)
+
+            dep = context.get("department") or ""
+            if self.entity.get("type") == "asset":
+                departments = self.core.projects.getAssetDepartments()
+            elif self.entity.get("type") == "shot":
+                departments = self.core.projects.getShotDepartments()
+            else:
+                departments = []
+
+            if not dep and departments:
+                dep = departments[0]["abbreviation"]
+
+            task = context.get("task") or ""
+            if not task and dep:
+                tasks = self.core.entities.getCategories(self.entity, dep)
+                dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), dep)
+                for dftTask in dftTasks:
+                    if dftTask not in tasks:
+                        tasks.append(dftTask)
+
+                if tasks:
+                    task = sorted(tasks, key=lambda x: x.lower())[0]
+
+            self.e_department.setText(dep)
+            self.e_task.setText(task)
+
+        self.l_product = QLabel("Product:")
+        self.e_product = QLineEdit()
+        self.e_product.textEdited.connect(lambda x: self.enableOk())
+        self.lo_settings.addWidget(self.l_product, row, 0)
+        self.lo_settings.addWidget(self.e_product, row, 1)
+        row += 1
+
+        self.l_location = QLabel("Location:")
+        self.cb_location = QComboBox()
+        locs = self.core.paths.getExportProductBasePaths()
+        for loc in list(locs.keys()):
+            self.cb_location.addItem(loc)
+
+        self.lo_settings.addWidget(self.l_location, row, 0)
+        self.lo_settings.addWidget(self.cb_location, row, 1)
+        if len(locs) < 2:
+            self.l_location.setHidden(True)
+            self.cb_location.setHidden(True)
+
+        row += 1
+
+        self.bb_main = QDialogButtonBox()
+        self.b_create = self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.b_create.setEnabled(False)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_settings)
+        self.lo_main.addStretch()
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def onDepartmentClicked(self):
+        tmenu = QMenu(self)
+
+        if self.entity.get("type") == "asset":
+            departments = self.core.projects.getAssetDepartments()
+        elif self.entity.get("type") == "shot":
+            departments = self.core.projects.getShotDepartments()
+        else:
+            departments = []
+
+        for dep in departments:
+            tAct = QAction(dep["abbreviation"], self)
+            tAct.triggered.connect(lambda x=None, d=dep["abbreviation"]: self.e_department.setText(d))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onTaskClicked(self):
+        tmenu = QMenu(self)
+
+        tasks = self.core.entities.getCategories(self.entity, self.e_department.text())
+        dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), self.e_department.text())
+        for dftTask in dftTasks:
+            if dftTask not in tasks:
+                tasks.append(dftTask)
+
+        for task in sorted(tasks, key=lambda x: x.lower()):
+            tAct = QAction(task, self)
+            tAct.triggered.connect(lambda x=None, t=task: self.e_task.setText(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.core.validateLineEdit(self.e_department)
+            if not depText:
+                self.core.popup("Invalid department.")
+                return
+
+            taskText = self.core.validateLineEdit(self.e_task)
+            if not taskText:
+                self.core.popup("Invalid task.")
+                return
+
+        prdText = self.core.validateLineEdit(self.e_product)
+        if not prdText:
+            self.core.popup("Invalid product.")
+            return
+
+        self.accept()
+
+    @err_catcher(name=__name__)
+    def enableOk(self):
+        prdText = self.core.validateLineEdit(self.e_product)
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.core.validateLineEdit(self.e_department)
+            taskText = self.core.validateLineEdit(self.e_task)
+            valid = bool(prdText and depText and taskText)
+        else:
+            valid = bool(prdText)
+
+        self.b_create.setEnabled(valid)
+
+
+class CreateProductVersionDlg(QDialog):
+    def __init__(self, origin, entity=None):
+        super(CreateProductVersionDlg, self).__init__()
+        self.parentDlg = origin
+        self.core = self.parentDlg.core
+        self.core.parentWindow(self, parent=self.parentDlg)
+        self.entity = entity
+        self.setupUi_()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        return QSize(500, 150)
+
+    @err_catcher(name=__name__)
+    def setupUi_(self):
+        self.setWindowTitle("Create Version")
+        self.lo_main = QVBoxLayout(self)
+
+        self.w_settings = QWidget()
+        self.lo_settings = QGridLayout(self.w_settings)
+        self.lo_settings.setContentsMargins(0, 9, 0, 9)
+
+        row = 0
+        self.l_version = QLabel("Version:")
+        self.sp_version = VersionSpinBox()
+        self.sp_version.core = self.core
+        self.sp_version.setRange(1, 99999)
+        self.lo_settings.addWidget(self.l_version, row, 0)
+        self.lo_settings.addWidget(self.sp_version, row, 1)
+        row += 1
+
+        self.l_location = QLabel("Location:")
+        self.cb_location = QComboBox()
+        locs = self.core.paths.getExportProductBasePaths()
+        for loc in list(locs.keys()):
+            self.cb_location.addItem(loc)
+
+        self.lo_settings.addWidget(self.l_location, row, 0)
+        self.lo_settings.addWidget(self.cb_location, row, 1)
+        if len(locs) < 2:
+            self.l_location.setHidden(True)
+            self.cb_location.setHidden(True)
+
+        row += 1
+
+        self.w_filePath = QWidget()
+        self.w_filePath.setObjectName("fileWidget")
+        self.l_filePathLabel = QLabel("File Path:")
+        self.l_filePath = QLabel("< Click or Drag & Drop files >")
+        self.l_filePath.setAlignment(Qt.AlignCenter)
+        self.l_filePath.setCursor(Qt.PointingHandCursor)
+        self.l_filePath.mouseReleaseEvent = self.fileMouseClickEvent
+        self.lo_filePath = QHBoxLayout(self.w_filePath)
+        self.lo_filePath.setContentsMargins(0, 20, 0, 20)
+        self.lo_filePath.addWidget(self.l_filePath)
+        self.lo_settings.addWidget(self.l_filePathLabel, row, 0)
+        self.lo_settings.addWidget(self.w_filePath, row, 1)
+        sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.w_filePath.setSizePolicy(sizePolicy)
+        self.w_filePath.setAcceptDrops(True)
+        self.w_filePath.dragEnterEvent = self.fileDragEnterEvent
+        self.w_filePath.dragMoveEvent = self.fileDragMoveEvent
+        self.w_filePath.dragLeaveEvent = self.fileDragLeaveEvent
+        self.w_filePath.dropEvent = self.fileDropEvent
+
+        row += 1
+
+        self.bb_main = QDialogButtonBox()
+        self.b_create = self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_settings)
+        self.lo_main.addStretch()
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def fileMouseClickEvent(self, event):
+        if event.type() == QEvent.MouseButtonRelease:
+            tmenu = QMenu(self)
+
+            tAct = QAction("Select File...", self)
+            tAct.triggered.connect(self.browseFile)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Select Folder...", self)
+            tAct.triggered.connect(self.browseFolder)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Copy", self)
+            tAct.triggered.connect(lambda: self.core.copyToClipboard(self.l_filePath.text()))
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Open in Explorer", self)
+            tAct.triggered.connect(self.openFolder)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Clear", self)
+            tAct.triggered.connect(self.clearFiles)
+            tmenu.addAction(tAct)
+
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def fileDragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.accept()
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def fileDragMoveEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.accept()
+            self.w_filePath.setStyleSheet(
+                "QWidget#fileWidget { border-style: dashed; border-color: rgb(100, 200, 100);  border-width: 2px; }"
+            )
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def fileDragLeaveEvent(self, e):
+        self.w_filePath.setStyleSheet("")
+
+    @err_catcher(name=__name__)
+    def fileDropEvent(self, e):
+        if e.mimeData().hasUrls():
+            self.w_filePath.setStyleSheet("")
+            e.setDropAction(Qt.LinkAction)
+            e.accept()
+
+            fname = [
+                os.path.normpath(str(url.toLocalFile())) for url in e.mimeData().urls()
+            ]
+            self.l_filePath.setText("\n".join(fname))
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def browseFolder(self):
+        startpath = self.l_filePath.text() or self.core.projectPath
+        selectedPath = QFileDialog.getExistingDirectory(
+            self, "Select folder", startpath
+        )
+
+        if selectedPath:
+            self.l_filePath.setText(selectedPath.replace("\\", "/"))
+
+    @err_catcher(name=__name__)
+    def browseFile(self):
+        startpath = self.l_filePath.text() or self.core.projectPath
+        selectedFile = QFileDialog.getOpenFileName(
+            self, "Select file", startpath
+        )[0]
+
+        if selectedFile:
+            self.l_filePath.setText(selectedFile.replace("\\", "/"))
+
+    @err_catcher(name=__name__)
+    def openFolder(self):
+        path = self.l_filePath.text()
+        self.core.openFolder(path)
+
+    @err_catcher(name=__name__)
+    def clearFiles(self):
+        self.l_filePath.setText("< Click or Drag & Drop files >")
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        self.accept()
+
+
+class CreateIdentifierDlg(QDialog):
+    def __init__(self, origin, entity=None):
+        super(CreateIdentifierDlg, self).__init__()
+        self.parentDlg = origin
+        self.core = self.parentDlg.core
+        self.core.parentWindow(self, parent=self.parentDlg)
+        self.entity = entity
+        self.setupUi_()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        return QSize(300, 150)
+
+    @err_catcher(name=__name__)
+    def setupUi_(self):
+        self.setWindowTitle("Create Identifier")
+        self.lo_main = QVBoxLayout(self)
+
+        self.w_settings = QWidget()
+        self.lo_settings = QGridLayout(self.w_settings)
+        self.lo_settings.setContentsMargins(0, 9, 0, 9)
+
+        row = 0
+        if self.core.mediaProducts.getLinkedToTasks():
+            self.l_department = QLabel("Department:")
+            self.e_department = QLineEdit()
+            self.e_department.textEdited.connect(lambda x: self.enableOk())
+            self.b_department = QPushButton("▼")
+            self.b_department.setMaximumSize(QSize(25, 16777215))
+            self.b_department.clicked.connect(self.onDepartmentClicked)
+            self.lo_settings.addWidget(self.l_department, row, 0)
+            self.lo_settings.addWidget(self.e_department, row, 1)
+            self.lo_settings.addWidget(self.b_department, row, 2)
+            row += 1
+
+            self.l_task = QLabel("Task:")
+            self.e_task = QLineEdit()
+            self.e_task.textEdited.connect(lambda x: self.enableOk())
+            self.b_task = QPushButton("▼")
+            self.b_task.setMaximumSize(QSize(25, 16777215))
+            self.b_task.clicked.connect(self.onTaskClicked)
+            self.lo_settings.addWidget(self.l_task, row, 0)
+            self.lo_settings.addWidget(self.e_task, row, 1)
+            self.lo_settings.addWidget(self.b_task, row, 2)
+            row += 1
+
+            fileName = self.core.getCurrentFileName()
+            context = self.core.getScenefileData(fileName)
+
+            dep = context.get("department") or ""
+            if self.entity.get("type") == "asset":
+                departments = self.core.projects.getAssetDepartments()
+            elif self.entity.get("type") == "shot":
+                departments = self.core.projects.getShotDepartments()
+            else:
+                departments = []
+
+            if not dep and departments:
+                dep = departments[0]["abbreviation"]
+
+            task = context.get("task") or ""
+            if not task and dep:
+                tasks = self.core.entities.getCategories(self.entity, dep)
+                dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), dep)
+                for dftTask in dftTasks:
+                    if dftTask not in tasks:
+                        tasks.append(dftTask)
+
+                if tasks:
+                    task = sorted(tasks, key=lambda x: x.lower())[0]
+
+            self.e_department.setText(dep)
+            self.e_task.setText(task)
+
+        self.l_identifier = QLabel("Identifier:")
+        self.e_identifier = QLineEdit()
+        self.e_identifier.textEdited.connect(lambda x: self.enableOk())
+        self.lo_settings.addWidget(self.l_identifier, row, 0)
+        self.lo_settings.addWidget(self.e_identifier, row, 1)
+        row += 1
+
+        self.l_mediaType = QLabel("Type:")
+        self.cb_mediaType = QComboBox()
+        self.cb_mediaType.addItems(["3D", "2D", "Playblast", "External"])
+        self.lo_settings.addWidget(self.l_mediaType, row, 0)
+        self.lo_settings.addWidget(self.cb_mediaType, row, 1)
+        row += 1
+
+        self.l_location = QLabel("Location:")
+        self.cb_location = QComboBox()
+        locs = self.core.paths.getRenderProductBasePaths()
+        for loc in list(locs.keys()):
+            self.cb_location.addItem(loc)
+
+        self.lo_settings.addWidget(self.l_location, row, 0)
+        self.lo_settings.addWidget(self.cb_location, row, 1)
+        if len(locs) < 2:
+            self.l_location.setHidden(True)
+            self.cb_location.setHidden(True)
+
+        row += 1
+
+        self.bb_main = QDialogButtonBox()
+        self.b_create = self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.b_create.setEnabled(False)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_settings)
+        self.lo_main.addStretch()
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def onDepartmentClicked(self):
+        tmenu = QMenu(self)
+
+        if self.entity.get("type") == "asset":
+            departments = self.core.projects.getAssetDepartments()
+        elif self.entity.get("type") == "shot":
+            departments = self.core.projects.getShotDepartments()
+        else:
+            departments = []
+
+        for dep in departments:
+            tAct = QAction(dep["abbreviation"], self)
+            tAct.triggered.connect(lambda x=None, d=dep["abbreviation"]: self.e_department.setText(d))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onTaskClicked(self):
+        tmenu = QMenu(self)
+
+        tasks = self.core.entities.getCategories(self.entity, self.e_department.text())
+        dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), self.e_department.text())
+        for dftTask in dftTasks:
+            if dftTask not in tasks:
+                tasks.append(dftTask)
+
+        for task in sorted(tasks, key=lambda x: x.lower()):
+            tAct = QAction(task, self)
+            tAct.triggered.connect(lambda x=None, t=task: self.e_task.setText(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.core.validateLineEdit(self.e_department)
+            if not depText:
+                self.core.popup("Invalid department.")
+                return
+
+            taskText = self.core.validateLineEdit(self.e_task)
+            if not taskText:
+                self.core.popup("Invalid task.")
+                return
+
+        idfText = self.core.validateLineEdit(self.e_identifier)
+        if not idfText:
+            self.core.popup("Invalid identifier.")
+            return
+
+        self.accept()
+
+    @err_catcher(name=__name__)
+    def enableOk(self):
+        idfText = self.core.validateLineEdit(self.e_identifier)
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.core.validateLineEdit(self.e_department)
+            taskText = self.core.validateLineEdit(self.e_task)
+            valid = bool(idfText and depText and taskText)
+        else:
+            valid = bool(idfText)
+
+        self.b_create.setEnabled(valid)
+
+
+class CreateMediaVersionDlg(QDialog):
+    def __init__(self, origin, entity=None):
+        super(CreateMediaVersionDlg, self).__init__()
+        self.parentDlg = origin
+        self.core = self.parentDlg.core
+        self.core.parentWindow(self, parent=self.parentDlg)
+        self.entity = entity
+        self.setupUi_()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        return QSize(300, 150)
+
+    @err_catcher(name=__name__)
+    def setupUi_(self):
+        self.setWindowTitle("Create Version")
+        self.lo_main = QVBoxLayout(self)
+
+        self.w_settings = QWidget()
+        self.lo_settings = QGridLayout(self.w_settings)
+        self.lo_settings.setContentsMargins(0, 9, 0, 9)
+
+        row = 0
+        self.l_version = QLabel("Version:")
+        self.sp_version = VersionSpinBox()
+        self.sp_version.core = self.core
+        self.sp_version.setRange(1, 99999)
+        self.lo_settings.addWidget(self.l_version, row, 0)
+        self.lo_settings.addWidget(self.sp_version, row, 1)
+        row += 1
+
+        self.l_location = QLabel("Location:")
+        self.cb_location = QComboBox()
+        locs = self.core.paths.getRenderProductBasePaths()
+        for loc in list(locs.keys()):
+            self.cb_location.addItem(loc)
+
+        self.lo_settings.addWidget(self.l_location, row, 0)
+        self.lo_settings.addWidget(self.cb_location, row, 1)
+        if len(locs) < 2:
+            self.l_location.setHidden(True)
+            self.cb_location.setHidden(True)
+
+        row += 1
+
+        self.bb_main = QDialogButtonBox()
+        self.b_create = self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_settings)
+        self.lo_main.addStretch()
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        self.accept()
+
+
+class IngestMediaDlg(QDialog):
+    def __init__(self, core, startText="", entity=None, parent=None):
+        QDialog.__init__(self)
+        self.core = core
+        self.entity = entity
+        self.core.parentWindow(self, parent=parent)
+        self.setupUi()
+        self.onMediaTypeChanged()
+        self.setEntity(entity)
+        if startText:
+            self.l_mediaPath.setText(startText)
+
+        self.sp_version.setValue(1)
+        self.b_create.setEnabled(False)
+        self.connectEvents()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        return QSize(600, 200)
+
+    @err_catcher(name=__name__)
+    def setupUi(self):
+        self.setWindowTitle("Ingest Media")
+
+        self.lo_main = QVBoxLayout(self)
+        self.w_settings = QWidget()
+        self.lo_settings = QGridLayout(self.w_settings)
+
+        row = 0
+
+        self.l_entity = QLabel("Entity:")
+        self.w_entity = QWidget()
+        self.lo_entity = QHBoxLayout(self.w_entity)
+        self.w_entity.setCursor(Qt.PointingHandCursor)
+        self.w_entity.mouseReleaseEvent = self.entityMouseClickEvent
+        self.l_entityPreview = QLabel()
+        self.l_entityName = QLabel()
+        self.lo_entity.addWidget(self.l_entityPreview)
+        self.lo_entity.addWidget(self.l_entityName)
+        self.lo_settings.addWidget(self.l_entity, row, 0)
+        self.lo_settings.addWidget(self.w_entity, row, 1)
+        row += 1
+
+        self.l_location = QLabel("Location:")
+        self.cb_location = QComboBox()
+        locs = self.core.paths.getRenderProductBasePaths()
+        for loc in list(locs.keys()):
+            self.cb_location.addItem(loc)
+
+        self.lo_settings.addWidget(self.l_location, row, 0)
+        self.lo_settings.addWidget(self.cb_location, row, 1)
+        if len(locs) < 2:
+            self.l_location.setHidden(True)
+            self.cb_location.setHidden(True)
+
+        row += 1
+
+        if self.core.mediaProducts.getLinkedToTasks():
+            self.l_department = QLabel("Department:")
+            self.e_department = QLineEdit()
+            self.e_department.textEdited.connect(lambda x: self.enableOk())
+            self.b_department = QPushButton("▼")
+            self.b_department.setMaximumSize(QSize(25, 16777215))
+            self.b_department.clicked.connect(self.onDepartmentClicked)
+            self.lo_settings.addWidget(self.l_department, row, 0)
+            self.lo_settings.addWidget(self.e_department, row, 1)
+            self.lo_settings.addWidget(self.b_department, row, 2)
+            row += 1
+
+            self.l_task = QLabel("Task:")
+            self.e_task = QLineEdit()
+            self.e_task.textEdited.connect(lambda x: self.enableOk())
+            self.b_task = QPushButton("▼")
+            self.b_task.setMaximumSize(QSize(25, 16777215))
+            self.b_task.clicked.connect(self.onTaskClicked)
+            self.lo_settings.addWidget(self.l_task, row, 0)
+            self.lo_settings.addWidget(self.e_task, row, 1)
+            self.lo_settings.addWidget(self.b_task, row, 2)
+            row += 1
+
+            fileName = self.core.getCurrentFileName()
+            context = self.core.getScenefileData(fileName)
+
+            dep = context.get("department") or ""
+            if self.entity.get("type") == "asset":
+                departments = self.core.projects.getAssetDepartments()
+            elif self.entity.get("type") == "shot":
+                departments = self.core.projects.getShotDepartments()
+            else:
+                departments = []
+
+            if not dep and departments:
+                dep = departments[0]["abbreviation"]
+
+            task = context.get("task") or ""
+            if not task and dep:
+                tasks = self.core.entities.getCategories(self.entity, dep)
+                dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), dep)
+                for dftTask in dftTasks:
+                    if dftTask not in tasks:
+                        tasks.append(dftTask)
+
+                if tasks:
+                    task = sorted(tasks, key=lambda x: x.lower())[0]
+
+            self.e_department.setText(dep)
+            self.e_task.setText(task)
+
+        self.l_identifier = QLabel("Identifier:")
+        self.e_identifier = QLineEdit()
+        self.e_identifier.textEdited.connect(lambda x: self.enableOk())
+        self.cb_identifierType = QComboBox()
+        self.cb_identifierType.addItem("3D", "3drenders")
+        self.cb_identifierType.addItem("2D", "2drenders")
+        self.cb_identifierType.addItem("Playblast", "playblasts")
+        self.cb_identifierType.addItem("External", "externalMedia")
+        self.cb_identifierType.currentIndexChanged.connect(self.onMediaTypeChanged)
+        self.w_identifier = QWidget()
+        self.lo_identifier = QHBoxLayout(self.w_identifier)
+        self.lo_identifier.setContentsMargins(0, 0, 0, 0)
+        self.lo_identifier.addWidget(self.e_identifier)
+        self.lo_identifier.addWidget(self.cb_identifierType)
+        self.b_identifier = QPushButton("▼")
+        self.b_identifier.setMaximumSize(QSize(25, 16777215))
+        self.b_identifier.clicked.connect(self.onIdentifierClicked)
+        self.lo_settings.addWidget(self.l_identifier, row, 0)
+        self.lo_settings.addWidget(self.w_identifier, row, 1)
+        self.lo_settings.addWidget(self.b_identifier, row, 2)
+        row += 1
+
+        self.l_version = QLabel("Version:")
+        self.sp_version = VersionSpinBox()
+        self.sp_version.core = self.core
+        self.sp_version.setRange(1, 99999)
+        self.b_version = QPushButton("▼")
+        self.b_version.setMaximumSize(QSize(25, 16777215))
+        self.b_version.clicked.connect(self.onVersionClicked)
+        self.lo_settings.addWidget(self.l_version, row, 0)
+        self.lo_settings.addWidget(self.sp_version, row, 1)
+        self.lo_settings.addWidget(self.b_version, row, 2)
+        row += 1
+
+        self.l_aov = QLabel("AOV:")
+        self.e_aov = QLineEdit()
+        self.e_aov.setText("rgb")
+        self.e_aov.textEdited.connect(lambda x: self.enableOk())
+        self.b_aov = QPushButton("▼")
+        self.b_aov.setMaximumSize(QSize(25, 16777215))
+        self.b_aov.clicked.connect(self.onAovClicked)
+        self.lo_settings.addWidget(self.l_aov, row, 0)
+        self.lo_settings.addWidget(self.e_aov, row, 1)
+        self.lo_settings.addWidget(self.b_aov, row, 2)
+        row += 1
+
+        self.w_mediaPath = QWidget()
+        self.w_mediaPath.setObjectName("mediaWidget")
+        self.l_mediaPathLabel = QLabel("Media Path:")
+        self.l_mediaPath = QLabel("< Click or Drag & Drop media >")
+        self.l_mediaPath.setAlignment(Qt.AlignCenter)
+        self.l_mediaPath.setCursor(Qt.PointingHandCursor)
+        self.l_mediaPath.mouseReleaseEvent = self.mediaMouseClickEvent
+        self.lo_mediaPath = QHBoxLayout(self.w_mediaPath)
+        self.lo_mediaPath.setContentsMargins(0, 20, 0, 20)
+        self.lo_mediaPath.addWidget(self.l_mediaPath)
+        self.lo_settings.addWidget(self.l_mediaPathLabel, row, 0)
+        self.lo_settings.addWidget(self.w_mediaPath, row, 1, 1, 2)
+        self.w_mediaPath.setAcceptDrops(True)
+        self.w_mediaPath.dragEnterEvent = self.mediaDragEnterEvent
+        self.w_mediaPath.dragMoveEvent = self.mediaDragMoveEvent
+        self.w_mediaPath.dragLeaveEvent = self.mediaDragLeaveEvent
+        self.w_mediaPath.dropEvent = self.mediaDropEvent
+
+        row += 1
+
+        self.w_action = QWidget()
+        self.l_action = QLabel("Action:")
+        self.rb_copy = QRadioButton("Copy")
+        self.rb_move = QRadioButton("Move")
+        self.rb_link = QRadioButton("Link")
+        self.lo_action = QHBoxLayout(self.w_action)
+        self.lo_action.setContentsMargins(0, 0, 0, 0)
+        self.lo_action.addStretch()
+        self.lo_action.addWidget(self.rb_copy)
+        self.lo_action.addWidget(self.rb_move)
+        self.lo_action.addWidget(self.rb_link)
+        self.lo_settings.addWidget(self.l_action, row, 0)
+        self.lo_settings.addWidget(self.w_action, row, 1, 1, 2)
+        self.rb_copy.setChecked(True)
+        row += 1
+
+        self.bb_main = QDialogButtonBox()
+        self.b_create = self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.b_create.setEnabled(False)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_settings)
+        self.lo_main.addStretch()
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def entityMouseClickEvent(self, event):
+        if event.type() == QEvent.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                if getattr(self, "dlg_entity", None):
+                    self.dlg_entity.close()
+
+                self.dlg_entity = self.core.getStateManager().entityDlg(self)
+                self.dlg_entity.w_entities.editEntitiesOnDclick = False
+                self.dlg_entity.w_entities.navigate(self.entity)
+                self.dlg_entity.entitySelected.connect(lambda x: self.setEntity(x))
+                self.dlg_entity.show()
+
+    @err_catcher(name=__name__)
+    def setEntity(self, entity):
+        self.entity = entity
+        pmap = self.core.entities.getEntityPreview(self.entity)
+        if not pmap:
+            pmap = self.core.media.emptyPrvPixmap
+
+        pmap = self.core.media.scalePixmap(pmap, 107, 60, fitIntoBounds=False, crop=True)
+        self.l_entityPreview.setPixmap(pmap)
+        entityName = "%s - %s" % (self.entity["type"].capitalize(), self.core.entities.getEntityName(self.entity))
+        self.l_entityName.setText(entityName)
+
+    @err_catcher(name=__name__)
+    def mediaMouseClickEvent(self, event):
+        if event.type() == QEvent.MouseButtonRelease:
+            tmenu = QMenu(self)
+
+            tAct = QAction("Select File...", self)
+            tAct.triggered.connect(self.browseFile)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Select Folder...", self)
+            tAct.triggered.connect(self.browseFolder)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Copy", self)
+            tAct.triggered.connect(lambda: self.core.copyToClipboard(self.l_mediaPath.text()))
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Open in Explorer", self)
+            tAct.triggered.connect(self.openFolder)
+            tmenu.addAction(tAct)
+
+            tAct = QAction("Clear", self)
+            tAct.triggered.connect(self.clearMedia)
+            tmenu.addAction(tAct)
+
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def mediaDragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.accept()
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def mediaDragMoveEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.accept()
+            self.w_mediaPath.setStyleSheet(
+                "QWidget#mediaWidget { border-style: dashed; border-color: rgb(100, 200, 100);  border-width: 2px; }"
+            )
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def mediaDragLeaveEvent(self, e):
+        self.w_mediaPath.setStyleSheet("")
+
+    @err_catcher(name=__name__)
+    def mediaDropEvent(self, e):
+        if e.mimeData().hasUrls():
+            self.w_mediaPath.setStyleSheet("")
+            e.setDropAction(Qt.LinkAction)
+            e.accept()
+
+            fname = [
+                os.path.normpath(str(url.toLocalFile())) for url in e.mimeData().urls()
+            ]
+            self.l_mediaPath.setText("\n".join(fname))
+            self.enableOk()
+        else:
+            e.ignore()
+
+    @err_catcher(name=__name__)
+    def onMediaTypeChanged(self, idx=None):
+        curType = self.cb_identifierType.currentData()
+        self.l_aov.setHidden(curType != "3drenders")
+        self.e_aov.setHidden(curType != "3drenders")
+        self.b_aov.setHidden(curType != "3drenders")
+        self.l_action.setHidden(curType != "externalMedia")
+        self.w_action.setHidden(curType != "externalMedia")
+        self.enableOk()
+
+    @err_catcher(name=__name__)
+    def onDepartmentClicked(self):
+        tmenu = QMenu(self)
+
+        if self.entity.get("type") == "asset":
+            departments = self.core.projects.getAssetDepartments()
+        elif self.entity.get("type") == "shot":
+            departments = self.core.projects.getShotDepartments()
+        else:
+            departments = []
+
+        for dep in departments:
+            tAct = QAction(dep["abbreviation"], self)
+            tAct.triggered.connect(lambda x=None, d=dep["abbreviation"]: self.e_department.setText(d))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onTaskClicked(self):
+        tmenu = QMenu(self)
+
+        tasks = self.core.entities.getCategories(self.entity, self.e_department.text())
+        dftTasks = self.core.entities.getDefaultTasksForDepartment(self.entity.get("type"), self.e_department.text())
+        for dftTask in dftTasks:
+            if dftTask not in tasks:
+                tasks.append(dftTask)
+
+        if not tasks:
+            return
+
+        for task in sorted(tasks, key=lambda x: x.lower()):
+            tAct = QAction(task, self)
+            tAct.triggered.connect(lambda x=None, t=task: self.e_task.setText(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onIdentifierClicked(self):
+        tmenu = QMenu(self)
+
+        entity = self.entity.copy()
+        if self.core.mediaProducts.getLinkedToTasks():
+            entity["department"] = self.e_department.text()
+            entity["task"] = self.e_task.text()
+
+        idfs = self.core.mediaProducts.getIdentifiersByType(entity)
+        idfNames = []
+        for mtype in idfs:
+            for idf in idfs[mtype]:
+                name = idf["identifier"]
+                idfNames.append(name)
+
+        for idfName in sorted(set(idfNames)):
+            tAct = QAction(idfName, self)
+            tAct.triggered.connect(lambda x=None, t=idfName: self.e_identifier.setText(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onVersionClicked(self):
+        tmenu = QMenu(self)
+
+        entity = self.entity.copy()
+        if self.core.mediaProducts.getLinkedToTasks():
+            entity["department"] = self.e_department.text()
+            entity["task"] = self.e_task.text()
+
+        entity["identifier"] = self.e_identifier.text()
+        entity["mediaType"] = self.cb_identifierType.currentData()
+        versions = self.core.mediaProducts.getVersionsFromIdentifier(entity)
+        for version in sorted(versions, key=lambda x: x["version"], reverse=True):
+            name = version["version"]
+            tAct = QAction(name, self)
+            intVersion = self.core.products.getIntVersionFromVersionName(name)
+            if intVersion is None:
+                continue
+
+            tAct.triggered.connect(lambda x=None, t=intVersion: self.sp_version.setValue(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def onAovClicked(self):
+        tmenu = QMenu(self)
+
+        entity = self.entity.copy()
+        if self.core.mediaProducts.getLinkedToTasks():
+            entity["department"] = self.e_department.text()
+            entity["task"] = self.e_task.text()
+
+        entity["identifier"] = self.e_identifier.text()
+        entity["mediaType"] = self.cb_identifierType.currentData()
+        entity["version"] = self.core.versionFormat % self.sp_version.value()
+        aovs = self.core.mediaProducts.getAOVsFromVersion(entity)
+        for aov in sorted(aovs, key=lambda x: x["aov"]):
+            name = aov["aov"]
+            tAct = QAction(name, self)
+            tAct.triggered.connect(lambda x=None, t=name: self.e_aov.setText(t))
+            tmenu.addAction(tAct)
+
+        if not tmenu.isEmpty():
+            tmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def connectEvents(self):
+        self.e_identifier.textChanged.connect(lambda x: self.enableOk())
+
+    @err_catcher(name=__name__)
+    def browseFolder(self):
+        startpath = self.l_mediaPath.text() or self.core.projectPath
+        selectedPath = QFileDialog.getExistingDirectory(
+            self, "Select media folder", startpath
+        )
+
+        if selectedPath:
+            self.l_mediaPath.setText(selectedPath.replace("\\", "/"))
+
+    @err_catcher(name=__name__)
+    def browseFile(self):
+        startpath = self.l_mediaPath.text() or self.core.projectPath
+        selectedFile = QFileDialog.getOpenFileName(
+            self, "Select media file", startpath
+        )[0]
+
+        if selectedFile:
+            self.l_mediaPath.setText(selectedFile.replace("\\", "/"))
+
+    @err_catcher(name=__name__)
+    def openFolder(self):
+        path = self.l_mediaPath.text()
+        self.core.openFolder(path)
+
+    @err_catcher(name=__name__)
+    def clearMedia(self):
+        self.l_mediaPath.setText("< Click or Drag & Drop media >")
+
+    @err_catcher(name=__name__)
+    def enableOk(self):
+        idfText = self.e_identifier.text()
+        mediaText = self.l_mediaPath.text()
+        mediaTextValid = bool(mediaText) and mediaText != "< Click or Drag & Drop media >"
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.e_department.text()
+            taskText = self.e_task.text()
+            valid = bool(idfText and mediaTextValid and depText and taskText)
+        else:
+            valid = bool(idfText and mediaTextValid)
+
+        if self.cb_identifierType.currentData() == "3drenders":
+            valid = valid and bool(self.e_aov.text())
+
+        self.b_create.setEnabled(valid)
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        if self.core.mediaProducts.getLinkedToTasks():
+            depText = self.core.validateLineEdit(self.e_department)
+            if not depText:
+                self.core.popup("Invalid department.")
+                return
+
+            taskText = self.core.validateLineEdit(self.e_task)
+            if not taskText:
+                self.core.popup("Invalid task.")
+                return
+
+        idfText = self.core.validateLineEdit(self.e_identifier)
+        if not idfText:
+            self.core.popup("Invalid identifier.")
+            return
+
+        if self.cb_identifierType.currentData() == "3drenders":
+            aovText = self.core.validateLineEdit(self.e_aov)
+            if not aovText:
+                self.core.popup("Invalid aov.")
+                return
+
+        mediaText = self.l_mediaPath.text()
+        if not mediaText or mediaText == "< Click or Drag & Drop media >":
+            self.core.popup("Invalid media path.")
+            return
+
+        self.accept()
+
+
+class VersionSpinBox(QSpinBox):
+    def textFromValue(self, value):
+        return self.core.versionFormat % value

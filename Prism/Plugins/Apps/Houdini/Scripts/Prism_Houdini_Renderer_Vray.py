@@ -261,6 +261,46 @@ def setCam(origin, node, val):
 
 
 def executeAOVs(origin, outputName):
+    if (
+        not origin.gb_submit.isHidden()
+        and origin.gb_submit.isChecked()
+        and origin.cb_manager.currentText() == "Deadline"
+        and origin.chb_rjVrscenes.isChecked()
+    ):
+        renderVrscenes = True
+
+        vrsceneOutput = os.path.join(
+            os.path.dirname(outputName), "_vrscene", os.path.basename(outputName)
+        )
+        vrsceneOutput = os.path.splitext(vrsceneOutput)[0] + ".vrscene"
+        parmPath = origin.core.appPlugin.getPathRelativeToProject(vrsceneOutput) if origin.core.appPlugin.getUseRelativePath() else vrsceneOutput
+        if not origin.core.appPlugin.setNodeParm(
+            origin.node, "render_export_filepath", val=parmPath
+        ):
+            return [
+                origin.state.text(0)
+                + ": error - could not set archive filename. Publish canceled"
+            ]
+
+        os.makedirs(os.path.dirname(vrsceneOutput))
+        if not origin.core.appPlugin.setNodeParm(
+            origin.node, "exp_separate_files", val=True
+        ):
+            return [
+                origin.state.text(0)
+                + ": error - could not set export separate files. Publish canceled"
+            ]
+    else:
+        renderVrscenes = False
+
+    if not origin.core.appPlugin.setNodeParm(
+        origin.node, "render_export_mode", val=("2" if renderVrscenes else "0")
+    ):
+        return [
+            origin.state.text(0)
+            + ": error - could not set archive enabled. Publish canceled"
+        ]
+
     if not origin.core.appPlugin.setNodeParm(
         origin.node, "SettingsOutput_img_save", val=True
     ):
@@ -308,3 +348,26 @@ def executeRender(origin):
 
 def postExecute(origin):
     return True
+
+
+def getCleanupScript():
+    script = """
+
+import os
+import sys
+import shutil
+
+vrsceneOutput = sys.argv[-1]
+
+delDir = os.path.dirname(vrsceneOutput)
+if os.path.basename(delDir) != "_vrscene":
+    raise RuntimeError("invalid vrscene directory: %s" % (delDir))
+
+if os.path.exists(delDir):
+    shutil.rmtree(delDir)
+    print("task completed successfully")
+else:
+    print("directory doesn't exist")
+
+"""
+    return script

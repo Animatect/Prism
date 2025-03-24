@@ -50,6 +50,7 @@ def isActive():
 
 
 def activated(origin):
+    origin.chb_format.setHidden(False)
     origin.w_separateAovs.setHidden(False)
     deep = ".exr (deep)"
     idx = origin.cb_format.findText(deep)
@@ -58,6 +59,7 @@ def activated(origin):
 
 
 def deactivated(origin):
+    origin.chb_format.setHidden(True)
     origin.w_separateAovs.setHidden(True)
     deep = ".exr (deep)"
     idx = origin.cb_format.findText(deep)
@@ -213,10 +215,7 @@ def executeAOVs(origin, outputName):
     ):
         renderASSs = True
 
-        assOutput = os.path.join(
-            os.path.dirname(outputName), "_ass", os.path.basename(outputName)
-        )
-        assOutput = os.path.splitext(assOutput)[0] + ".ass"
+        assOutput = getAssOutputPath(origin, outputName)
         parmPath = origin.core.appPlugin.getPathRelativeToProject(assOutput) if origin.core.appPlugin.getUseRelativePath() else assOutput
         if not origin.core.appPlugin.setNodeParm(
             origin.node, "ar_ass_file", val=parmPath
@@ -226,7 +225,8 @@ def executeAOVs(origin, outputName):
                 + ": error - could not set archive filename. Publish canceled"
             ]
 
-        os.makedirs(os.path.dirname(assOutput))
+        assOutput = assOutput.replace("$OS", origin.node.name())
+        os.makedirs(os.path.dirname(hou.text.expandString(assOutput)))
 
     else:
         renderASSs = False
@@ -239,22 +239,27 @@ def executeAOVs(origin, outputName):
             + ": error - could not set archive enabled. Publish canceled"
         ]
 
-    base, ext = os.path.splitext(outputName)
-    if ext == ".exr":
-        formatVal = "exr"
-    elif ext == ".png":
-        formatVal = "png"
-    elif ext == ".jpg":
-        formatVal = "jpeg"
-    else:
-        return [
-            origin.state.text(0) + ": error - invalid image format. Publish canceled"
-        ]
+    if origin.chb_format.isChecked():
+        base, ext = os.path.splitext(outputName)
+        if ext == ".exr":
+            fmt = origin.getFormat()
+            if fmt == ".exr (deep)":
+                formatVal = "deepexr"
+            else:
+                formatVal = "exr"
+        elif ext == ".png":
+            formatVal = "png"
+        elif ext == ".jpg":
+            formatVal = "jpeg"
+        else:
+            return [
+                origin.state.text(0) + ": error - invalid image format. Publish canceled"
+            ]
 
-    if not origin.core.appPlugin.setNodeParm(
-        origin.node, "ar_picture_format", val=formatVal
-    ):
-        return [origin.state.text(0) + ": error - Publish canceled"]
+        if not origin.core.appPlugin.setNodeParm(
+            origin.node, "ar_picture_format", val=formatVal
+        ):
+            return [origin.state.text(0) + ": error - Publish canceled"]
 
     parmPath = origin.core.appPlugin.getPathRelativeToProject(outputName) if origin.core.appPlugin.getUseRelativePath() else outputName
     if not origin.core.appPlugin.setNodeParm(origin.node, "ar_picture", val=parmPath):
@@ -268,6 +273,7 @@ def executeAOVs(origin, outputName):
         else:
             passName = passVar
 
+        passName = passName.strip("*_")
         origin.passNames.append([passName, passVar])
         passOutputName = os.path.join(
             os.path.dirname(os.path.dirname(outputName)),
@@ -348,3 +354,12 @@ else:
 
 """
     return script
+
+
+def getAssOutputPath(origin, renderOutputPath):
+    jobOutputFile = os.path.join(
+        os.path.dirname(renderOutputPath), "_ass", os.path.basename(renderOutputPath)
+    )
+    jobOutputFile = os.path.splitext(jobOutputFile)[0] + ".ass"
+    jobOutputFile = jobOutputFile.replace("\\", "/")
+    return jobOutputFile

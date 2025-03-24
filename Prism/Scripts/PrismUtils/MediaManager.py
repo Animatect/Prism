@@ -93,15 +93,18 @@ class MediaManager(object):
             ".mp4",
             ".mov",
             ".avi",
+            ".m4v",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
     def filterValidMediaFiles(self, filepaths):
         validFiles = []
         for mediaFile in sorted(filepaths):
-            if os.path.splitext(mediaFile)[1] in self.supportedFormats:
+            if os.path.splitext(mediaFile)[1].lower() in self.supportedFormats:
+                validFiles.append(mediaFile)
+            elif os.path.basename(mediaFile) == "REDIRECT.txt":
                 validFiles.append(mediaFile)
 
         return validFiles
@@ -109,9 +112,9 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def detectSequence(self, filepaths):
         seq = []
-        base = re.sub("\d+", "", filepaths[0])
+        base = re.sub(r"\d+", "", filepaths[0])
         for filepath in sorted(filepaths):
-            if re.sub("\d+", "", filepath) == base:
+            if re.sub(r"\d+", "", filepath) == base:
                 seq.append(filepath)
 
         return seq
@@ -120,6 +123,7 @@ class MediaManager(object):
     def getSequenceFromFilename(self, filename):
         seq = filename
         baseName, extension = os.path.splitext(os.path.basename(filename))
+        extension = extension.lower()
         if len(baseName) >= self.core.framePadding:
             endStr = baseName[-self.core.framePadding:]
             if pVersion == 2:
@@ -179,12 +183,14 @@ class MediaManager(object):
         psources = []
         for file in files:
             baseName, extension = os.path.splitext(file)
+            extension = extension.lower()
             if extension in self.core.media.supportedFormats:
                 filename = self.getFilenameWithoutFrameNumber(file)
                 psources.append(os.path.splitext(filename))
 
         for file in sorted(files):
             baseName, extension = os.path.splitext(file)
+            extension = extension.lower()
             if extension in self.core.media.supportedFormats:
                 if getFirstFile:
                     return [file]
@@ -278,7 +284,7 @@ class MediaManager(object):
             reader = "Error - empty file: %s" % filepath
         else:
             imageio = self.getImageIO()
-            filepath = str(filepath)  # unicode causes errors in Python 2
+            filepath = str(filepath).lower()  # unicode causes errors in Python 2
             try:
                 reader = imageio.get_reader(filepath, "ffmpeg")
             except Exception as e:
@@ -309,13 +315,7 @@ class MediaManager(object):
         oiio = None
         try:
             if platform.system() == "Windows":
-                if pVersion == 2:
-                    if self.core.appPlugin.pluginName == "Nuke":
-                        from oiio22_msvc1426 import OpenImageIO as oiio
-                    else:
-                        from oiio1618 import OpenImageIO as oiio
-                else:
-                    from oiio_2_4 import OpenImageIO as oiio
+                from oiio_2_4 import OpenImageIO as oiio
 
             elif platform.system() in ["Linux", "Darwin"]:
                 import OpenImageIO as oiio
@@ -337,6 +337,14 @@ class MediaManager(object):
                 import imageio_ffmpeg
             except:
                 logger.debug("failed to load imageio: %s" % traceback.format_exc())
+            else:
+                try:
+                    imageio.config.known_plugins["FFMPEG"].legacy_args["extensions"] += " .m4v"
+                    for ext in imageio.config.extension_list:
+                        if ext.extension == ".m4v":
+                            ext.priority.insert(0, "FFMPEG")
+                except:
+                    pass
 
             self._imageio = imageio
 
@@ -401,9 +409,9 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def convertMedia(self, inputpath, startNum, outputpath, settings=None):
         inputpath = inputpath.replace("\\", "/")
-        inputExt = os.path.splitext(inputpath)[1]
-        outputExt = os.path.splitext(outputpath)[1]
-        videoInput = inputExt in [".mp4", ".mov"]
+        inputExt = os.path.splitext(inputpath)[1].lower()
+        outputExt = os.path.splitext(outputpath)[1].lower()
+        videoInput = inputExt in [".mp4", ".mov", ".m4v"]
         startNum = str(startNum) if startNum is not None else None
 
         ffmpegPath = self.getFFmpeg(validate=True)
@@ -553,6 +561,7 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def getUseThumbnailForFile(self, filepath):
         _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
         useThumb = ext in [".exr", ".dpx", ".hdr"] or ext in self.videoFormats
         return useThumb        
 
@@ -567,7 +576,7 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def getPixmapFromExrPath(self, path, width=None, height=None, channel=None, allowThumb=True, regenerateThumb=False):
         thumbEnabled = self.getUseThumbnails()
-        if allowThumb and thumbEnabled and not regenerateThumb:
+        if allowThumb and thumbEnabled and not regenerateThumb and path:
             thumbPath = self.getThumbnailPath(path)
             if os.path.exists(thumbPath):
                 return self.getPixmapFromPath(thumbPath, width=width, height=height)
@@ -580,6 +589,10 @@ class MediaManager(object):
 
         path = str(path)  # for python 2
         imgInput = oiio.ImageInput.open(path)
+        if not imgInput:
+            logger.debug("failed to read media file: %s" % path)
+            return
+
         chbegin = 0
         chend = 3
         subimage = 0
@@ -602,14 +615,23 @@ class MediaManager(object):
                     chend = chbegin + 3
                     break
 
-        pixels = imgInput.read_image(subimage=subimage, miplevel=0, chbegin=chbegin, chend=chend)
+        try:
+            pixels = imgInput.read_image(subimage=subimage, miplevel=0, chbegin=chbegin, chend=chend)
+        except Exception as e:
+            logger.warning("failed to read image: %s - %s" % (path, e))
+            return
+
+        if pixels is None:
+            logger.warning("failed to read image (no pixels): %s" % (path))
+            return
+
         rgbImgSrc = oiio.ImageBuf(
             oiio.ImageSpec(imgInput.spec().full_width, imgInput.spec().full_height, 3, oiio.UINT16)
         )
         imgInput.close()
 
         if "numpy" in globals():
-            rgbImgSrc.set_pixels(oiio.ROI.All, numpy.array(pixels))
+            rgbImgSrc.set_pixels(imgInput.spec().roi, numpy.array(pixels))
         else:
             for h in range(height):
                 for w in range(width):
@@ -669,7 +691,7 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def getPixmapFromPath(self, path, width=None, height=None, colorAdjust=False):
         if path:
-            _, ext = os.path.splitext(path)
+            ext = os.path.splitext(path)[1].lower()
             if ext in self.core.media.videoFormats:
                 return self.getPixmapFromVideoPath(path)
             elif ext in [".exr", ".dpx", ".hdr"]:
@@ -678,7 +700,12 @@ class MediaManager(object):
                 )
 
         pixmap = QPixmap(path)
-        if (width or height) and not pixmap.isNull():
+        if pixmap.isNull():
+            pixmap = self.core.media.getPixmapFromExrPath(
+                path, width, height
+            )
+
+        if (width or height) and pixmap and not pixmap.isNull():
             pixmap = self.scalePixmap(pixmap, width, height)
 
         return pixmap
@@ -776,6 +803,9 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def scalePixmap(self, pixmap, width, height, keepRatio=True, fitIntoBounds=True, crop=False, fillBackground=False):
+        if not pixmap:
+            return pixmap
+
         if keepRatio:
             if fitIntoBounds:
                 mode = Qt.KeepAspectRatio
@@ -796,7 +826,11 @@ class MediaManager(object):
         if fitIntoBounds:
             if fillBackground:
                 new_pixmap = QPixmap(width, height)
-                new_pixmap.fill(Qt.black)
+                if fillBackground is True:
+                    new_pixmap.fill(Qt.black)
+                else:
+                    new_pixmap.fill(fillBackground)
+
                 painter = QPainter(new_pixmap)
                 painter.drawPixmap((width-pixmap.width())/2, (height-pixmap.height())/2, pixmap)
                 painter.end()
@@ -853,6 +887,7 @@ class MediaManager(object):
         pwidth = None
         pheight = None
         base, ext = os.path.splitext(path)
+        ext = ext.lower()
 
         if ext in [
             ".jpg",
@@ -878,7 +913,7 @@ class MediaManager(object):
                 imgSpecs = buf.spec()
                 pwidth = imgSpecs.full_width
                 pheight = imgSpecs.full_height
-        elif ext in [".mp4", ".mov", ".avi"]:
+        elif ext in [".mp4", ".mov", ".avi", ".m4v"]:
             if videoReader is None:
                 videoReader = self.getVideoReader(path)
 
@@ -970,11 +1005,12 @@ class MediaManager(object):
             path = paths[0]
 
         comd = [progPath, path]
-
+        logger.debug("opening media: %s" % comd)
         with open(os.devnull, "w") as f:
             try:
                 subprocess.Popen(comd, stdin=subprocess.PIPE, stdout=f, stderr=f)
             except:
+                comd = "%s %s" % (comd[0], comd[1])
                 try:
                     subprocess.Popen(
                         comd, stdin=subprocess.PIPE, stdout=f, stderr=f, shell=True
@@ -999,7 +1035,11 @@ class MediaManager(object):
                 base, "00_Pipeline/Fallbacks/" + filename
             )
 
-        return self.core.media.getPixmapFromPath(imgFile)
+        pmap = self.core.media.getPixmapFromPath(imgFile)
+        if not pmap:
+            pmap = QPixmap()
+
+        return pmap
 
     @property
     @err_catcher(name=__name__)

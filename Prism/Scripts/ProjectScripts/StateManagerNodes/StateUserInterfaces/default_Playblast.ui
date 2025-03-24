@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>340</width>
-    <height>598</height>
+    <width>342</width>
+    <height>822</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -27,7 +27,7 @@
     <number>0</number>
    </property>
    <item>
-    <widget class="QWidget" name="widget_4" native="true">
+    <widget class="QWidget" name="w_name" native="true">
      <layout class="QHBoxLayout" name="horizontalLayout_4">
       <property name="leftMargin">
        <number>9</number>
@@ -204,12 +204,6 @@
          </item>
          <item row="1" column="6">
           <widget class="QSpinBox" name="sp_rangeEnd">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>
@@ -220,12 +214,6 @@
          </item>
          <item row="0" column="6">
           <widget class="QSpinBox" name="sp_rangeStart">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>
@@ -872,9 +860,9 @@
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="groupBox_3">
+    <widget class="QGroupBox" name="gb_previous">
      <property name="title">
-      <string>Last playblast</string>
+      <string>Previous playblast</string>
      </property>
      <property name="checkable">
       <bool>false</bool>
@@ -905,8 +893,8 @@
           <rect>
            <x>0</x>
            <y>0</y>
-           <width>289</width>
-           <height>69</height>
+           <width>269</width>
+           <height>138</height>
           </rect>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_3">

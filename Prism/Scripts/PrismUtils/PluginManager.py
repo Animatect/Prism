@@ -186,11 +186,16 @@ class PluginManager(object):
                 dirName = "Apps"
             elif pluginType == "Custom":
                 dirName = "Custom"
+            else:
+                dirName = ""
 
-            pluginPath = os.path.join(pluginPath, dirName)
+            if dirName:
+                pluginPath = os.path.join(pluginPath, dirName)
 
         if pluginName:
             pluginPath = os.path.join(pluginPath, pluginName)
+            if pluginType == "Single File":
+                pluginPath += ".py"
 
         return pluginPath.replace("\\", "/")
 
@@ -267,7 +272,7 @@ class PluginManager(object):
 
         if (
             not getattr(self.core, "messageParent", None)
-            and QApplication.instance() is not None
+            and ((self.core.appPlugin.pluginName != "Houdini" or sys.version_info.minor != 11) and QApplication.instance() is not None)
         ):
             for arg in self.core.prismArgs:
                 if isinstance(arg, dict) and "messageParent" in arg:
@@ -288,6 +293,7 @@ class PluginManager(object):
         if not startup:
             self.core.appPlugin.startup(self.core)
 
+        self.core.callback("pluginLoaded", args=[self.core.appPlugin])
         logger.debug("loaded app plugin %s" % pluginName)
         return self.core.appPlugin
 
@@ -339,6 +345,9 @@ class PluginManager(object):
                                 continue
 
                             if pDir == self.core.appPlugin.pluginName:
+                                continue
+
+                            if pDir.startswith(".") or pDir.startswith("_"):
                                 continue
 
                             path = os.path.join(dr, pDir)
@@ -435,16 +444,33 @@ class PluginManager(object):
         return self.loadPlugin(path)
 
     @err_catcher(name=__name__)
-    def loadPlugin(self, path=None, name=None, force=True, activate=None):
+    def loadPlugin(self, path=None, name=None, force=True, activate=None, showWarnings=False):
         if not path:
             if name:
-                path = self.searchPluginPath(name)
-                if not path:
-                    logger.debug("couldn't find plugin: %s" % name)
+                pluginPaths = self.searchPluginPaths(name)
+                if not pluginPaths:
+                    msg = "couldn't find plugin: %s" % name
+                    if showWarnings:
+                        self.core.popup(msg)
+                    else:
+                        logger.debug(msg)
+
                     return
 
+                for pluginPath in pluginPaths:
+                    result = self.loadPlugin(path=pluginPath, name=name, force=force, activate=activate)
+                    if result:
+                        return result
+
+                return
+
             if not path:
-                logger.debug('invalid pluginpath: "%s"' % path)
+                msg = "invalid pluginpath: \"%s\"" % path
+                if showWarnings:
+                    self.core.popup(msg)
+                else:
+                    logger.debug(msg)
+
                 return
 
         if os.path.normpath(path).startswith(os.path.normpath(self.core.prismRoot)):
@@ -495,7 +521,12 @@ class PluginManager(object):
                 if force:
                     self.unloadPlugin(pluginName)
                 else:
-                    logger.warning('plugin is already loaded: "%s"' % pluginName)
+                    msg = "plugin is already loaded: \"%s\"" % pluginName
+                    if showWarnings:
+                        self.core.popup(msg)
+                    else:
+                        logger.warning(msg)
+
                     return
 
             # logger.debug(pluginName)
@@ -505,17 +536,24 @@ class PluginManager(object):
 
             if pluginName in notAutoLoadedPlugins and not force:
                 if not os.path.exists(path):
-                    logger.debug("pluginpath doesn't exist: %s" % path)
+                    msg = "pluginpath doesn't exist: %s" % path
+                    if showWarnings:
+                        self.core.popup(msg)
+                    else:
+                        logger.debug(msg)
+
                     return
 
                 if activate:
                     return self.activatePlugin(path)
 
                 self.core.unloadedPlugins[pluginName] = UnloadedPlugin(self.core, pluginName, path=pluginPath, location=location)
-                logger.debug(
-                    "skipped loading plugin %s - autoload of this plugin is disabled in the preferences"
-                    % pluginName
-                )
+                msg = "skipped loading plugin %s - autoload of this plugin is disabled in the preferences" % pluginName
+                if showWarnings:
+                    self.core.popup(msg)
+                else:
+                    logger.debug(msg)
+
                 return
 
             if self.core.appPlugin and (pluginName == self.core.appPlugin.pluginName):
@@ -526,9 +564,12 @@ class PluginManager(object):
                 or os.path.exists(initPath.replace("_init", "_init_unloaded"))
             ):
                 # self.core.unloadedPlugins[pluginName] = UnloadedPlugin(self.core, pluginName, path=pluginPath, location=location)
-                logger.warning(
-                    "skipped loading plugin %s - folder doesn't contain a valid plugin (no init script) - check your plugin configuration. %s " % (pluginName, path)
-                )
+                msg = "skipped loading plugin %s - folder doesn't contain a valid plugin (no init script) - check your plugin configuration. %s " % (pluginName, path)
+                if showWarnings:
+                    self.core.popup(msg)
+                else:
+                    logger.debug(msg)
+
                 return
 
         if os.path.dirname(initPath) not in sys.path:
@@ -536,23 +577,30 @@ class PluginManager(object):
 
         try:
             if path.endswith(".py"):
+                if not os.path.exists(path):
+                    msg = "pluginpath doesn't exist: %s" % path
+                    if showWarnings:
+                        self.core.popup(msg)
+                    else:
+                        logger.debug(msg)
+
+                    return
+
                 plugModule = __import__(pluginName)
                 if hasattr(plugModule, "name"):
                     pluginName = plugModule.name
 
                 if pluginName in notAutoLoadedPlugins and not force:
-                    if not os.path.exists(path):
-                        logger.debug("pluginpath doesn't exist: %s" % path)
-                        return
-
                     if activate:
                         return self.activatePlugin(path)
 
                     self.core.unloadedPlugins[pluginName] = UnloadedPlugin(self.core, pluginName, path=pluginPath, location=location)
-                    logger.debug(
-                        "skipped loading plugin %s - autoload of this plugin is disabled in the preferences"
-                        % pluginName
-                    )
+                    msg = "skipped loading plugin %s - autoload of this plugin is disabled in the preferences" % pluginName
+                    if showWarnings:
+                        self.core.popup(msg)
+                    else:
+                        logger.debug(msg)
+
                     return
 
                 if hasattr(plugModule, "classname"):
@@ -594,10 +642,12 @@ class PluginManager(object):
             return
 
         if hasattr(pPlug, "platforms") and platform.system() not in pPlug.platforms:
-            logger.debug(
-                "skipped loading plugin %s - plugin doesn't support this OS"
-                % pPlug.pluginName
-            )
+            msg = "skipped loading plugin %s - plugin doesn't support this OS" % pPlug.pluginName
+            if showWarnings:
+                self.core.popup(msg)
+            else:
+                logger.debug(msg)
+
             return
 
         if pluginName in self.core.unloadedPlugins:
@@ -611,7 +661,12 @@ class PluginManager(object):
         else:
             if not getattr(pPlug, "isActive", lambda: True)():
                 self.core.unloadedPlugins[pPlug.pluginName] = pPlug
-                logger.debug('plugin "%s" is inactive' % pPlug.pluginName)
+                msg = "plugin \"%s\" is inactive" % pPlug.pluginName
+                if showWarnings:
+                    self.core.popup(msg)
+                else:
+                    logger.debug(msg)
+
                 return
 
             if not hasattr(pPlug, "pluginType") or pPlug.pluginType in ["Custom"]:
@@ -998,38 +1053,65 @@ class PluginManager(object):
 
     @err_catcher(name=__name__)
     def createPlugin(self, pluginName, pluginType, location="root", path=""):
-        presetPath = self.getPluginPath("root", pluginType)
-        presetPath = os.path.join(presetPath, "PluginEmpty")
-
-        if not os.path.exists(presetPath):
-            msg = (
-                "Canceled plugin creation: Empty preset doesn't exist:\n\n%s"
-                % self.core.fixPath(presetPath)
-            )
-            self.core.popup(msg)
-            return
-
         targetPath = self.getPluginPath(location, pluginType, path, pluginName)
-
         if os.path.exists(targetPath):
             msg = "Canceled plugin creation: Plugin already exists:\n\n%s" % targetPath
             self.core.popup(msg)
             return
 
-        try:
-            shutil.copytree(presetPath, targetPath)
-        except PermissionError:
-            msg = "Failed to copy files to: \"%s\"\n\nMake sure you have the required permissions and try again." % targetPath
-            self.core.popup(msg)
-            return
+        if pluginType == "Single File":
+            script = """name = "PLUGINNAME"
+classname = "PLUGINNAME"
 
-        self.core.replaceFolderContent(targetPath, "PluginEmpty", pluginName)
 
-        scriptPath = os.path.join(targetPath, "Scripts")
-        if not os.path.exists(scriptPath):
-            scriptPath = targetPath
+import os
+from qtpy.QtWidgets import *
 
-        self.core.openFolder(scriptPath)
+
+class PLUGINNAME:
+    def __init__(self, core):
+        self.core = core
+        self.version = "v1.0.0"
+
+        self.core.registerCallback("postInitialize", self.postInitialize, plugin=self)
+
+    def postInitialize(self):
+        # do stuff after Prism launched
+        pass
+"""
+            script = script.replace("PLUGINNAME", pluginName)
+            if not os.path.exists(os.path.dirname(targetPath)):
+                os.makedirs(os.path.dirname(targetPath))
+
+            with open(targetPath, "w") as f:
+                f.write(script)
+
+            self.core.openFolder(targetPath)
+        else:
+            presetPath = self.getPluginPath("root", pluginType)
+            presetPath = os.path.join(presetPath, "PluginEmpty")
+            if not os.path.exists(presetPath):
+                msg = (
+                    "Canceled plugin creation: Empty preset doesn't exist:\n\n%s"
+                    % self.core.fixPath(presetPath)
+                )
+                self.core.popup(msg)
+                return
+
+            try:
+                shutil.copytree(presetPath, targetPath)
+            except PermissionError:
+                msg = "Failed to copy files to: \"%s\"\n\nMake sure you have the required permissions and try again." % targetPath
+                self.core.popup(msg)
+                return
+
+            self.core.replaceFolderContent(targetPath, "PluginEmpty", pluginName)
+            scriptPath = os.path.join(targetPath, "Scripts")
+            if not os.path.exists(scriptPath):
+                scriptPath = targetPath
+
+            self.core.openFolder(scriptPath)
+
         return targetPath
 
     @err_catcher(name=__name__)
@@ -1124,6 +1206,15 @@ class PluginManager(object):
 
     @err_catcher(name=__name__)
     def searchPluginPath(self, pluginName):
+        paths = self.searchPluginPaths(pluginName)
+        if paths:
+            return paths[0]
+        else:
+            return False
+
+    @err_catcher(name=__name__)
+    def searchPluginPaths(self, pluginName):
+        paths = []
         userPluginConfig = self.core.getConfig(config="PluginPaths") or {}
         if "plugins" in userPluginConfig:
             for path in userPluginConfig["plugins"]:
@@ -1131,7 +1222,7 @@ class PluginManager(object):
                     continue
 
                 if pluginName == os.path.basename(path["path"]):
-                    return path["path"]
+                    paths.append(path["path"])
 
         if "searchPaths" in userPluginConfig:
             for path in userPluginConfig["searchPaths"]:
@@ -1141,7 +1232,7 @@ class PluginManager(object):
                 pluginNames = os.listdir(path["path"])
                 if pluginName in pluginNames:
                     path = os.path.join(path["path"], pluginName)
-                    return path
+                    paths.append(path)
 
         pluginDirs = self.getPluginDirs()
         dirs = [folder for folder in pluginDirs["searchPaths"] if folder not in userPluginConfig.get("searchPaths", [])]
@@ -1151,7 +1242,11 @@ class PluginManager(object):
         )
 
         if plugins:
-            return plugins[0]["path"]
+            for plugin in plugins:
+                paths.append(plugin["path"])
+
+        if paths:
+            return list(set(paths))
 
         return False
 
@@ -1183,9 +1278,14 @@ class PluginManager(object):
         functionId = functionInfo["id"]
         origClass = functionInfo["class"]
 
-        if functionId in self.monkeyPatchedFunctions:
+        if self.isFunctionMonkeyPatched(orig):
             if force:
-                self.core.plugins.unmonkeyPatchFunction(self.monkeyPatchedFunctions[functionId])
+                patch = self.getFunctionPatch(orig)
+                orig = patch["orig"]
+                functionInfo = self.getFunctionInfo(orig)
+                functionId = functionInfo["id"]
+                origClass = functionInfo["class"]
+                self.core.plugins.unmonkeyPatchFunction(patch)
                 logger.debug("replacing existing monkeypatch for %s" % functionId)
             else:
                 if not quiet:
@@ -1261,7 +1361,7 @@ class PluginManager(object):
                     if patch["plugin"].pluginName == pref:
                         return patch["new"]
 
-        return patches[0]["orig"] if patches else None
+        return patches[0] if patches else None
 
     @err_catcher(name=__name__)
     def callUnpatchedFunction(self, function, *args, **kwargs):
@@ -1270,7 +1370,7 @@ class PluginManager(object):
             if "preferredPatchers" in kwargs:
                 del kwargs["preferredPatchers"]
 
-            return patch(*args, **kwargs)
+            return patch["orig"](*args, **kwargs)
         else:
             mid = self.getFunctionInfo(function)["id"]
             logger.debug("failed to call unpatched function for: %s" % mid)
@@ -1311,7 +1411,8 @@ class PluginManager(object):
         data = {
             "key": plugin,
             "origin": "prismOss",
-            "prism_version": self.core.version
+            "prism_version": self.core.version,
+            "opsystem": platform.system(),
         }
         serverUrl = "https://service.prism-pipeline.com"
         if plugin == "Hub":
@@ -1322,42 +1423,45 @@ class PluginManager(object):
         import requests
         response = requests.get(url, data)
         if not isinstance(response, requests.Response):
-            raise Exception("Failed to connect to server.")
+            self.core.popup("Failed to connect to server.")
 
         if response.status_code != 200:
-            raise Exception("Failed to connect to server. Code %s" % response.status_code)
+            self.core.popup("Failed to connect to server. Code %s" % response.status_code)
 
         try:
             result = response.json()
         except:
-            raise Exception(str(response.content))
+            self.core.popup(str(response.content))
 
         if result.get("error"):
-            raise Exception("Error in response: %s" % result.get("error"))
+            self.core.popup("Error in response: %s" % result.get("error"))
 
         file = result["files"][0]
         cachePath = os.path.join(path, ".cache")
         zippath = os.path.join(cachePath, os.path.basename(file["url"]))
         try:
             response = requests.get(file["url"], headers=file["headers"])
-        except Exception:
+        except Exception as e:
+            self.core.popup("Error in request: %s" % str(e))
             return
 
         data = response.content
         if not data:
+            self.core.popup("Empty response.")
             return
 
         if not os.path.exists(os.path.dirname(zippath)):
             try:
                 os.makedirs(os.path.dirname(zippath))
             except Exception:
+                self.core.popup("Failed to create folder: %s\n\n%s" % (os.path.dirname(zippath), str(e)))
                 return
 
         try:
             with open(zippath, "wb") as f:
                 f.write(data)
-        except Exception:
-            pass
+        except Exception as e:
+            self.core.popup("Failed to write to file:\n\n%s" % str(e))
         else:
             return zippath
 
@@ -1366,13 +1470,20 @@ class PluginManager(object):
         pluginNames = []
         basePath = ""
         zipfile = importlib.import_module("zipfile")
+        tarfile = importlib.import_module("tarfile")
         for pluginUpdate in pluginUpdates:
             if os.path.exists(pluginUpdate.get("target")):
                 self.removePlugin(pluginUpdate.get("target"))
 
             try:
-                with zipfile.ZipFile(pluginUpdate.get("zip"), "r") as zip_ref:
-                    zip_ref.extractall(os.path.dirname(pluginUpdate.get("target")))
+                target = os.path.dirname(pluginUpdate.get("target"))
+                zippath = pluginUpdate.get("zip")
+                if zippath.lower().endswith(".zip"):
+                    with zipfile.ZipFile(zippath, "r") as zip_ref:
+                        zip_ref.extractall(target)
+                elif zippath.lower().endswith(".tar.gz"):
+                    with tarfile.open(zippath, 'r') as tar:
+                        tar.extractall(target)
             except:
                 pass
             else:
@@ -1518,6 +1629,9 @@ class PluginManager(object):
                     result = self.core.popupQuestion(msg)
                     if result == "Yes":
                         self.setupIntegrations(pluginName)
+
+                if hasattr(plug, "postInstall"):
+                    plug.postInstall()
 
             logger.debug("installed plugin %s to %s" % (pluginName, basepath))
 

@@ -134,20 +134,23 @@ class ConfigManager(object):
 
             configPath = os.path.join(projectPath, "00_Pipeline", "pipeline.yml")
         else:
-            configName = self.getProjectConfigName()
-            configRelPath = os.getenv("PRISM_PROJECT_CONFIG_PATH")
-            if not configRelPath or not useEnv:
-                if pipelineDir:
-                    pipeDir = pipelineDir
-                else:
-                    pipeDir = self.core.projects.getDefaultPipelineFolder()
-                configRelPath = os.path.join(pipeDir, configName)
+            if getattr(self.core, "projectPath", "") and os.path.normpath(projectPath) == os.path.normpath(self.core.projectPath):
+                configPath = self.core.prismIni
+            else:
+                configName = self.getProjectConfigName()
+                configRelPath = os.getenv("PRISM_PROJECT_CONFIG_PATH")
+                if not configRelPath or not useEnv:
+                    if pipelineDir:
+                        pipeDir = pipelineDir
+                    else:
+                        pipeDir = self.core.projects.getDefaultPipelineFolder()
+                    configRelPath = os.path.join(pipeDir, configName)
 
-            configPath = os.path.join(projectPath, configRelPath)
-            if not os.path.exists(configPath):
-                configPath2 = os.path.join(projectPath, configName)
-                if os.path.exists(configPath2):
-                    configPath = configPath2
+                configPath = os.path.join(projectPath, configRelPath)
+                if not os.path.exists(configPath):
+                    configPath2 = os.path.join(projectPath, configName)
+                    if os.path.exists(configPath2):
+                        configPath = configPath2
 
         return configPath
 
@@ -158,6 +161,8 @@ class ConfigManager(object):
             self.cachedConfigs.pop(path, None)
         else:
             self.cachedConfigs = {}
+
+        self.core.callback("postClearConfigCache", args=[path])
 
     @err_catcher(name=__name__)
     def getCacheTime(self, path):
@@ -277,6 +282,7 @@ class ConfigManager(object):
         config=None,
         dft=None,
         location=None,
+        allowCache=True,
     ):
         if not configPath and config:
             configPath = self.getConfigPath(config, location=location)
@@ -286,7 +292,7 @@ class ConfigManager(object):
         if configPath:
             configPath = os.path.normpath(configPath)
 
-        if configPath in self.cachedConfigs:
+        if configPath in self.cachedConfigs and allowCache:
             configData = self.cachedConfigs[configPath]["data"]
             if isinstance(configData, collections.Mapping):
                 configData = configData.copy()
@@ -328,11 +334,12 @@ class ConfigManager(object):
             if configData is None:
                 return dft
 
-            mdate = self.core.getFileModificationDate(configPath, asString=False)
-            self.cachedConfigs[configPath] = {
-                "modtime": mdate,
-                "data": configData,
-            }
+            if allowCache:
+                mdate = self.core.getFileModificationDate(configPath, asString=False)
+                self.cachedConfigs[configPath] = {
+                    "modtime": mdate,
+                    "data": configData,
+                }
 
             # logger.debug("adding cache: %s ---- %s" % (configPath, configData))
 

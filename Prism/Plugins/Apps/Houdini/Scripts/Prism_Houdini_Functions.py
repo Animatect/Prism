@@ -122,6 +122,7 @@ class Prism_Houdini_Functions(object):
             }
         ]
         self.registerCallbacks()
+        logging.getLogger("whoosh").setLevel(logging.WARNING)
 
     @err_catcher(name=__name__)
     def registerCallbacks(self):
@@ -860,6 +861,9 @@ class Prism_Houdini_Functions(object):
 
     @err_catcher(name=__name__)
     def getPathRelativeToProject(self, path):
+        if not path:
+            return path
+
         try:
             if path.startswith("$"):
                 path = path.replace("\\", "/")
@@ -869,7 +873,8 @@ class Prism_Houdini_Functions(object):
                 path = "$PRISM_JOB/" + os.path.relpath(path, self.core.projectPath)
         except ValueError as e:
             logger.warning(str(e) + " - path: %s - start: %s" % (path, self.core.projectPath))
-        
+
+        path = path.replace("\\", "/")
         return path
 
     @err_catcher(name=__name__)
@@ -878,6 +883,80 @@ class Prism_Houdini_Functions(object):
             return [path[: -len(".bgeo.sc")], ".bgeo.sc"]
         else:
             return os.path.splitext(path)
+
+    @err_catcher(name=__name__)
+    def importImages(self, filepath=None, mediaBrowser=None, parent=None):
+        if mediaBrowser:
+            sourceData = mediaBrowser.compGetImportSource()
+            if not sourceData:
+                return
+
+            filepath = sourceData[0][0].replace("#"*self.core.framePadding, "$F" + str(self.core.framePadding))
+            firstFrame = sourceData[0][1]
+            lastFrame = sourceData[0][2]
+            parent = parent or mediaBrowser
+
+        fString = "Please select an import option:"
+        buttons = ["Camera Backplate", "Dome Light", "Cancel"]
+        result = self.core.popupQuestion(fString, buttons=buttons, icon=QMessageBox.NoIcon, parent=parent)
+
+        if result == "Camera Backplate":
+            self.importBackplate(filepath)
+        elif result == "Dome Light":
+            self.importDomeLightTexture(filepath)
+        else:
+            return
+
+    @err_catcher(name=__name__)
+    def importBackplate(self, mediaPath):
+        camParms = {
+            "cam": "vm_background",
+            "vrcam": "vm_background",
+            "lopimportcam": "vm_background",
+            "camera": "xn__houdinibackgroundimage_xcb",
+        }
+        cams = [n for n in hou.selectedNodes() if n.type().name().split("::")[0] in camParms]
+        if cams:
+            cam = cams[0]
+        else:
+            cam = hou.node("/stage").createNode("camera")
+            cam.moveToGoodPosition()
+
+        cam.parm(camParms[cam.type().name().split("::")[0]]).set(mediaPath)
+        cam.setDisplayFlag(True)
+        if hasattr(cam, "setRenderFlag"):
+            cam.setRenderFlag(True)
+
+        desktop = hou.ui.curDesktop()
+        sceneViewer = desktop.paneTabOfType(hou.paneTabType.SceneViewer)
+        viewport = sceneViewer.curViewport()
+        if cam.type().name().split("::")[0] == "camera":
+            vpcam = cam.parm("primpath").eval()
+        else:
+            vpcam = cam
+
+        viewport.setCamera(vpcam)
+        self.goToNode(cam)
+
+    @err_catcher(name=__name__)
+    def importDomeLightTexture(self, mediaPath):
+        lightParms = {
+            "domelight": "xn__inputstexturefile_r3ah",
+            "envlight": "env_map",
+        }
+        lights = [n for n in hou.selectedNodes() if n.type().name().split("::")[0] in lightParms]
+        if lights:
+            light = lights[0]
+        else:
+            light = hou.node("/stage").createNode("domelight")
+            light.moveToGoodPosition()
+
+        light.parm(lightParms[light.type().name().split("::")[0]]).set(mediaPath)
+        light.setDisplayFlag(True)
+        if hasattr(light, "setRenderFlag"):
+            light.setRenderFlag(True)
+
+        self.goToNode(light)
 
     @err_catcher(name=__name__)
     def setNodeParm(self, node, parm, val=None, clear=False, severity="warning"):
@@ -968,7 +1047,12 @@ class Prism_Houdini_Functions(object):
                 msg = "Do you also want to delete the connected node?\n\n%s" % (
                     item.ui.node.path()
                 )
-                result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"], title="Delete State", default="No")
+
+                buttons = ["Yes", "No"]
+                if len(origin.stateManager.getSelectedStates()) > 1:
+                    buttons.insert(1, "Yes to all")
+
+                result = self.core.popupQuestion(msg, buttons=buttons, title="Delete State", default="No")
 
             if result in ["Yes", "Yes to all"]:
                 try:
@@ -1479,8 +1563,10 @@ class Prism_Houdini_Functions(object):
         sceneCams = []
         for node in hou.node("/").allSubChildren():
             if (
-                node.type().name() == "cam" and node.name() != "ipr_camera"
-            ) or node.type().name() == "vrcam":
+                (node.type().name() == "cam" and node.name() != "ipr_camera")
+                or node.type().name() == "vrcam"
+                or node.type().name() == "lopimportcam"
+            ):
                 sceneCams.append(node)
 
         if cur:
@@ -1517,9 +1603,26 @@ class Prism_Houdini_Functions(object):
         stateCategories = []
         if stateType == "Render":
             renderers = self.getRendererPlugins()
-            if len(hou.selectedNodes()) > 0:
+            validNodes = [n for n in hou.selectedNodes() if origin.stateTypes["ImageRender"].isConnectableNode(n)]
+            if len(validNodes) > 1:
+                for node in hou.selectedNodes():
+                    curSel = origin.getCurrentItem(origin.activeList)
+                    if (
+                        origin.activeList == origin.tw_export
+                        and curSel is not None
+                        and curSel.ui.className == "Folder"
+                    ):
+                        parent = curSel
+                    else:
+                        parent = None
+
+                    origin.createState("ImageRender", parent=parent, setActive=True, node=node)
+
+                return
+
+            if len(validNodes) > 0:
                 for i in renderers:
-                    if hou.selectedNodes()[0].type().name() in i.ropNames:
+                    if validNodes[0].type().name() in i.ropNames:
                         stateData = {"label": "Render", "stateType": "ImageRender"}
                         return stateData
 
@@ -1847,7 +1950,7 @@ class Prism_Houdini_Functions(object):
         return node
 
     @err_catcher(name=__name__)
-    def getStateFromNode(self, kwargs, create=True):
+    def getStateFromNode(self, kwargs, create=True, ignoreTypes=None):
         sm = self.core.getStateManager()
         if not sm:
             return
@@ -1858,6 +1961,9 @@ class Prism_Houdini_Functions(object):
             node = getattr(state.ui, "node", None)
             if not self.isNodeValid(None, node):
                 node = None
+
+            if ignoreTypes and state.ui.className in ignoreTypes:
+                continue
 
             if node and node.path() == knode.path():
                 return state

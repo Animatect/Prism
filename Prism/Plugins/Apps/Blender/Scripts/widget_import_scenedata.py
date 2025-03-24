@@ -36,17 +36,9 @@ import os
 
 import bpy
 
-try:
-    from PySide2.QtCore import *
-    from PySide2.QtGui import *
-    from PySide2.QtWidgets import *
-
-    psVersion = 2
-except:
-    from PySide.QtCore import *
-    from PySide.QtGui import *
-
-    psVersion = 1
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 
 from PrismUtils.Decorators import err_catcher as err_catcher
 
@@ -184,23 +176,50 @@ class Import_SceneData(QDialog):
         # bpy.context.collection.children.link creates collections, which can't have library overrides so we have to use bpy.ops
         if link:
             if data["collections"]:
-                bpy.ops.wm.link(
-                    ctx,
-                    directory=self.scenepath + "/Collection/",
-                    files=data["collections"],
-                )
+                if bpy.app.version < (4, 0, 0):
+                    bpy.ops.wm.link(
+                        ctx,
+                        directory=self.scenepath + "/Collection/",
+                        files=data["collections"],
+                    )
+                else:
+                    with bpy.context.temp_override(**ctx):
+                        bpy.ops.wm.link(
+                            directory=self.scenepath + "/Collection/",
+                            files=data["collections"],
+                        )
             if data["objects"]:
-                bpy.ops.wm.link(
-                    ctx, directory=self.scenepath + "/Object/", files=data["objects"]
-                )
+                if bpy.app.version < (4, 0, 0):
+                    bpy.ops.wm.link(
+                        ctx, directory=self.scenepath + "/Object/", files=data["objects"]
+                    )
+                else:
+                    with bpy.context.temp_override(**ctx):
+                        bpy.ops.wm.link(
+                            directory=self.scenepath + "/Object/", files=data["objects"]
+                        )
+
         else:
             if data["collections"]:
-                bpy.ops.wm.append(
-                    ctx,
-                    directory=self.scenepath + "/Collection/",
-                    files=data["collections"],
-                )
+                if bpy.app.version < (4, 0, 0):
+                    bpy.ops.wm.append(
+                        ctx,
+                        directory=self.scenepath + "/Collection/",
+                        files=data["collections"],
+                    )
+                else:
+                    with bpy.context.temp_override(**ctx):
+                        bpy.ops.wm.append(
+                            directory=self.scenepath + "/Collection/",
+                            files=data["collections"],
+                        )
             if data["objects"]:
-                bpy.ops.wm.append(
-                    ctx, directory=self.scenepath + "/Object/", files=data["objects"]
-                )
+                if bpy.app.version < (4, 0, 0):
+                    bpy.ops.wm.append(
+                        ctx, directory=self.scenepath + "/Object/", files=data["objects"]
+                    )
+                else:
+                    with bpy.context.temp_override(**ctx):
+                        bpy.ops.wm.append(
+                            directory=self.scenepath + "/Object/", files=data["objects"]
+                        )

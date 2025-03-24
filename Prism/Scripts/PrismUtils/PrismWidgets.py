@@ -372,6 +372,180 @@ class CreateDepartmentDlg(QDialog):
         self.accept()
 
 
+class CreateTaskPresetDlg(QDialog):
+
+    taskPresetCreated = Signal(object)
+
+    def __init__(self, core, entity=None, configData=None, preset=None, parent=None):
+        QDialog.__init__(self)
+        self.core = core
+        self.entity = entity
+        self.configData = configData
+        self.core.parentWindow(self, parent)
+        self.setupUi()
+        self.refreshDepartments()
+        if preset:
+            self.setWindowTitle("Edit Task Preset")
+            self.setName(preset["name"])
+            self.selectDepartments(preset["departments"])
+            self.bb_main.buttons()[0].setText("Save")
+
+    @err_catcher(name=__name__)
+    def setupUi(self):
+        self.setWindowTitle("Create Task Preset")
+        self.lo_main = QVBoxLayout(self)
+
+        self.w_name = QWidget()
+        self.lo_name = QHBoxLayout(self.w_name)
+        self.l_name = QLabel("Task Preset Name:")
+        self.e_name = QLineEdit()
+        self.lo_name.addWidget(self.l_name)
+        self.lo_name.addWidget(self.e_name)
+
+        self.w_presetDepartments = QWidget()
+        self.lo_presetDepartments = QHBoxLayout(self.w_presetDepartments)
+        self.lo_presetDepartments.setContentsMargins(0, 0, 0, 0)
+        self.w_departments = QWidget()
+        self.lo_departments = QVBoxLayout(self.w_departments)
+        self.l_departments = QLabel("Departments:")
+        self.lw_departments = QListWidget()
+        self.lw_departments.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.lw_departments.itemSelectionChanged.connect(self.onDepartmentSelectionChanged)
+        self.lo_departments.addWidget(self.l_departments)
+        self.lo_departments.addWidget(self.lw_departments)
+
+        self.w_tasks = QWidget()
+        self.lo_tasks = QVBoxLayout(self.w_tasks)
+        self.l_tasks = QLabel("Tasks:")
+        self.lw_tasks = QListWidget()
+        self.lw_tasks.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.lw_tasks.itemSelectionChanged.connect(self.onTaskSelectionChanged)
+        self.lo_tasks.addWidget(self.l_tasks)
+        self.lo_tasks.addWidget(self.lw_tasks)
+
+        self.lo_presetDepartments.addWidget(self.w_departments)
+        self.lo_presetDepartments.addWidget(self.w_tasks)
+
+        self.bb_main = QDialogButtonBox()
+        self.bb_main.addButton("Create", QDialogButtonBox.AcceptRole)
+        self.bb_main.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.bb_main.accepted.connect(self.createClicked)
+        self.bb_main.rejected.connect(self.reject)
+
+        self.lo_main.addWidget(self.w_name)
+        self.lo_main.addWidget(self.w_presetDepartments)
+        self.lo_main.addWidget(self.bb_main)
+
+    @err_catcher(name=__name__)
+    def onDepartmentSelectionChanged(self):
+        self.lw_tasks.blockSignals(True)
+        self.lw_tasks.clear()
+        self.lw_tasks.blockSignals(False)
+        depItems = self.lw_departments.selectedItems()
+        if len(depItems) != 1:
+            return
+
+        depData = depItems[0].data(Qt.UserRole)
+        depName = depData["name"]
+        if self.entity == "asset":
+            departments = self.core.projects.getAssetDepartments()
+        else:
+            departments = self.core.projects.getShotDepartments()
+
+        for department in departments:
+            if department["name"] == depName:
+                tasks = department.get("defaultTasks", [])
+                break
+        else:
+            return
+
+        for task in tasks:
+            item = QListWidgetItem(task)
+            self.lw_tasks.addItem(item)
+            if task in depData["tasks"]:
+                item.setSelected(True)
+
+    @err_catcher(name=__name__)
+    def onTaskSelectionChanged(self):
+        item = self.lw_departments.selectedItems()[0]
+        data = item.data(Qt.UserRole)
+        data["tasks"] = [item.text() for item in self.lw_tasks.selectedItems()]
+        item.setData(Qt.UserRole, data)
+        name = data["name"]
+        if data["tasks"]:
+            name += " (%s)" % (", ".join(data["tasks"]))
+        item.setText(name)
+
+    @err_catcher(name=__name__)
+    def getName(self):
+        return self.e_name.text()
+
+    @err_catcher(name=__name__)
+    def setName(self, name):
+        self.e_name.setText(name)
+
+    @err_catcher(name=__name__)
+    def getDepartments(self):
+        departments = []
+        for item in self.lw_departments.selectedItems():
+            dep = item.data(Qt.UserRole)
+            departments.append(dep)
+
+        return departments
+
+    @err_catcher(name=__name__)
+    def selectDepartments(self, departments):
+        self.lw_departments.clearSelection()
+        for idx in range(self.lw_departments.count()):
+            item = self.lw_departments.item(idx)
+            itemData = item.data(Qt.UserRole)
+            for department in departments:
+                if department["name"] == itemData["name"]:
+                    item.setSelected(True)
+                    item.setData(Qt.UserRole, department)
+                    name = department["name"]
+                    if department["tasks"]:
+                        name += " (%s)" % (", ".join(department["tasks"]))
+
+                    item.setText(name)
+
+        self.onDepartmentSelectionChanged()
+
+    @err_catcher(name=__name__)
+    def refreshDepartments(self):
+        self.lw_departments.clear()
+        if self.entity == "asset":
+            departments = self.core.projects.getAssetDepartments()
+        else:
+            departments = self.core.projects.getShotDepartments()
+
+        for department in departments:
+            item = QListWidgetItem(department["name"])
+            data = {"name": department["name"], "tasks": []}
+            item.setData(Qt.UserRole, data)
+            self.lw_departments.addItem(item)
+
+    @err_catcher(name=__name__)
+    def createClicked(self):
+        name = self.getName()
+        departments = self.getDepartments()
+
+        if not name:
+            self.core.popup("Please specify a preset name.")
+            return
+
+        if self.bb_main.buttons()[0].text() == "Create":
+            preset = self.core.projects.addTaskPreset(
+                entity=self.entity,
+                name=name,
+                departments=departments,
+                configData=self.configData
+            )
+            self.taskPresetCreated.emit(preset)
+
+        self.accept()
+
+
 class EnterText(QDialog, EnterText_ui.Ui_dlg_EnterText):
     def __init__(self):
         QDialog.__init__(self)
@@ -433,7 +607,12 @@ class SaveComment(QDialog, SaveComment_ui.Ui_dlg_SaveComment):
     def setEmptyPreview(self):
         imgFile = os.path.join(self.core.projects.getFallbackFolder(), "noFileBig.jpg")
         pmap = self.core.media.getPixmapFromPath(imgFile)
-        pmap = pmap.scaled(QSize(self.core.scenePreviewWidth, self.core.scenePreviewHeight))
+        if pmap:
+            pmap = pmap.scaled(QSize(self.core.scenePreviewWidth, self.core.scenePreviewHeight))
+        else:
+            pmap = QPixmap(self.core.scenePreviewWidth, self.core.scenePreviewHeight)
+            pmap.fill(Qt.black)
+
         self.l_preview.setPixmap(pmap)
 
     @err_catcher(name=__name__)

@@ -227,7 +227,10 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
                 shotData["sequence"] = seq
                 shotData["shot"] = shot
 
-                result = self.core.entities.createEntity(shotData)
+                result = self.core.entities.createEntity(shotData, frameRange=[self.sp_startFrame.value(), self.sp_endFrame.value()], preview=getattr(self, "pmap", None))
+                if self.chb_taskPreset.isChecked():
+                    self.core.entities.createTasksFromPreset(shotData, self.cb_taskPreset.currentData())
+
                 self.shotCreated.emit(shotData)
 
         return result
@@ -235,16 +238,20 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
     @err_catcher(name=__name__)
     def buttonboxClicked(self, button):
         if button.text() == "Add":
-            result = self.saveInfo()
+            result = self.validateInput()
             if result:
+                self.shotData = self.getShotData()
                 self.createEntities()
+
             self.shotData = {}
             self.onShotIncrementClicked()
         elif button.text() == "Create":
-            result = self.saveInfo()
+            result = self.validateInput()
             if result:
+                self.shotData = self.getShotData()
                 self.createEntities()
                 self.accept(True)
+
         elif button.text() == "Save":
             result = self.saveInfo()
             if result:
@@ -280,8 +287,9 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
         return data
 
     @err_catcher(name=__name__)
-    def saveInfo(self):
-        newShotData = self.getShotData()
+    def validateInput(self, newShotData=None):
+        if newShotData is None:
+            newShotData = self.getShotData()
 
         if not self.editSequence and not newShotData["shot"] or (newShotData["shot"].startswith("_") and newShotData["shot"] != "_sequence"):
             self.core.popup("Invalid shotname", parent=self)
@@ -290,6 +298,15 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
         if not newShotData["sequence"] or newShotData["sequence"].startswith("_"):
             self.core.popup("Invalid sequencename", parent=self)
             return False
+
+        return True
+
+    @err_catcher(name=__name__)
+    def saveInfo(self):
+        newShotData = self.getShotData()
+        result = self.validateInput(newShotData)
+        if not result:
+            return result
 
         if self.shotData.get("sequence") and newShotData["sequence"] != self.shotData["sequence"]:
             msgText = (
@@ -383,8 +400,11 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
 
             shotRange = self.core.entities.getShotRange(self.shotData)
             if shotRange:
-                self.sp_startFrame.setValue(shotRange[0])
-                self.sp_endFrame.setValue(shotRange[1])
+                if shotRange[0] is not None:
+                    self.sp_startFrame.setValue(shotRange[0])
+
+                if shotRange[1] is not None:
+                    self.sp_endFrame.setValue(shotRange[1])
 
             width = self.shotPrvXres
             height = self.shotPrvYres
@@ -451,6 +471,26 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
             self.l_shot.setText("Shot(s):")
             self.e_shotName.setToolTip("Shot name or comma separated list of shot names")
 
+            self.w_taskPreset = QWidget()
+            self.lo_taskPreset = QHBoxLayout(self.w_taskPreset)
+            self.lo_taskPreset.setContentsMargins(9, 0, 9, 0)
+            self.l_taskPreset = QLabel("Task Preset:")
+            self.chb_taskPreset = QCheckBox()
+            self.cb_taskPreset = QComboBox()
+            self.cb_taskPreset.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            self.lo_taskPreset.addWidget(self.l_taskPreset)
+            self.lo_taskPreset.addStretch()
+            self.lo_taskPreset.addWidget(self.chb_taskPreset)
+            self.lo_taskPreset.addWidget(self.cb_taskPreset)
+            self.cb_taskPreset.setEnabled(self.chb_taskPreset.isChecked())
+            self.chb_taskPreset.toggled.connect(self.cb_taskPreset.setEnabled)
+            presets = self.core.projects.getShotTaskPresets()
+            if presets:
+                for preset in presets:
+                    self.cb_taskPreset.addItem(preset.get("name", ""), preset)
+
+                self.layout().insertWidget(self.layout().indexOf(self.w_buttons)-2, self.w_taskPreset)
+
         if not pmap:
             imgFile = os.path.join(
                 self.core.projects.getFallbackFolder(), "noFileSmall.jpg"
@@ -464,7 +504,7 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
     @err_catcher(name=__name__)
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
-            self.buttonboxClicked(self.buttonBox.buttons()[-1])
+            self.buttonboxClicked(self.buttonBox.buttons()[0])
         elif event.key() == Qt.Key_Escape:
             self.reject()
 

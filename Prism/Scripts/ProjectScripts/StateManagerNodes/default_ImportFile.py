@@ -69,9 +69,8 @@ class ImportFileClass(object):
         self.stateNameTemplate = self.core.getConfig(
             "globals",
             "defaultImportStateName",
-            dft=stateNameTemplate,
             configPath=self.core.prismIni,
-        )
+        ) or stateNameTemplate
         self.e_name.setText(self.stateNameTemplate)
         self.l_name.setVisible(False)
         self.e_name.setVisible(False)
@@ -98,12 +97,12 @@ class ImportFileClass(object):
             and not createEmptyState
             and not self.stateManager.standalone
         ):
-            import ProductBrowser
-
-            ts = ProductBrowser.ProductBrowser(core=core, importState=self)
-            core.parentWindow(ts)
-            ts.exec_()
-            importPath = ts.productPath
+            importPaths = self.requestImportPaths()
+            if importPaths:
+                importPath = importPaths[-1]
+                if len(importPaths) > 1:
+                    for importPath in importPaths[:-1]:
+                        stateManager.importFile(importPath)
 
         if importPath:
             self.setImportPath(importPath)
@@ -131,6 +130,20 @@ class ImportFileClass(object):
     def setStateMode(self, stateMode):
         self.stateMode = stateMode
         self.l_class.setText(stateMode)
+
+    @err_catcher(name=__name__)
+    def requestImportPaths(self):
+        result = self.core.callback("requestImportPath", self)
+        for res in result:
+            if isinstance(res, dict) and res.get("importPaths") is not None:
+                return res["importPaths"]
+
+        import ProductBrowser
+        ts = ProductBrowser.ProductBrowser(core=self.core, importState=self)
+        self.core.parentWindow(ts)
+        ts.exec_()
+        importPath = [ts.productPath]
+        return importPath
 
     @err_catcher(name=__name__)
     def loadData(self, data):

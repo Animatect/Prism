@@ -37,6 +37,7 @@ import sys
 import platform
 import logging
 import subprocess
+import traceback
 
 from qtpy.QtCore import *
 from qtpy.QtGui import *
@@ -225,7 +226,20 @@ class Prism_Houdini_externalAccess_Functions(object):
             if appPath:
                 args = [appPath, "-n", self.core.fixPath(filepath)]
                 logger.debug("opening Houdini: %s" % args)
-                subprocess.Popen(args, env=self.core.startEnv)
-                fileStarted = True
+                try:
+                    subprocess.Popen(args, env=self.core.startEnv)
+                except:
+                    mods = QApplication.keyboardModifiers()
+                    if mods == Qt.ControlModifier:
+                        if os.path.isfile(args[0]):
+                            msg = "Could not execute file:\n\n%s\n\nUsed arguments: %s" % (traceback.format_exc(), args)
+                        else:
+                            msg = "Executable doesn't exist:\n\n%s\n\nCheck your executable override in the Prism User Settings." % args[0]
+                        self.core.popup(msg)
+                    else:
+                        subprocess.Popen(" ".join(args), env=self.core.startEnv, shell=True)
+                        fileStarted = True
+                else:
+                    fileStarted = True
 
         return fileStarted

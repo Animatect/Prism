@@ -34,18 +34,12 @@
 
 import os
 import sys
-import platform
 import subprocess
+import traceback
 
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
-
-if platform.system() == "Windows":
-    if sys.version[0] == "3":
-        import winreg as _winreg
-    else:
-        import _winreg
 
 from PrismUtils.Decorators import err_catcher_plugin as err_catcher
 
@@ -147,8 +141,21 @@ class Prism_Nuke_externalAccess_Functions(object):
                 elif nukeVersion == "Non-Commercial":
                     args.insert(-1, "--nc")
 
-                subprocess.Popen(args, env=self.core.startEnv)
-                fileStarted = True
+                try:
+                    subprocess.Popen(args, env=self.core.startEnv)
+                except:
+                    mods = QApplication.keyboardModifiers()
+                    if mods == Qt.ControlModifier:
+                        if os.path.isfile(args[0]):
+                            msg = "Could not execute file:\n\n%s\n\nUsed arguments: %s" % (traceback.format_exc(), args)
+                        else:
+                            msg = "Executable doesn't exist:\n\n%s\n\nCheck your executable override in the Prism User Settings." % args[0]
+                        self.core.popup(msg)
+                    else:
+                        subprocess.Popen(" ".join(args), env=self.core.startEnv, shell=True)
+                        fileStarted = True
+                else:
+                    fileStarted = True
 
         return fileStarted
 

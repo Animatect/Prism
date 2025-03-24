@@ -58,7 +58,7 @@ class Prism_3dsMax_Integration(object):
 
         if platform.system() == "Windows":
             self.examplePath = (
-                os.environ["localappdata"] + "\\Autodesk\\3dsMax\\2024 - 64bit"
+                os.environ["localappdata"] + "\\Autodesk\\3dsMax\\2025 - 64bit"
             )
 
     @err_catcher(name=__name__)

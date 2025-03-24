@@ -112,25 +112,17 @@ class RenderSettingsClass(object):
             if idx != -1:
                 self.cb_presetOption.setCurrentIndex(idx)
         if "editsettings" in data:
-            self.chb_editSettings.setChecked(
-                eval(
-                    data["editsettings"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                )
-            )
+            if type(data["editsettings"]) == bool:
+                self.chb_editSettings.setChecked(data["editsettings"])
+
         if "rendersettings" in data:
             settings = self.core.writeYaml(data=data["rendersettings"])
             self.te_settings.setPlainText(settings)
         if "stateenabled" in data:
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         getattr(self.core.appPlugin, "sm_renderSettings_loadData", lambda x, y: None)(
             self, data
@@ -336,11 +328,11 @@ class RenderSettingsClass(object):
             {
                 "statename": self.e_name.text(),
                 "presetoption": self.cb_presetOption.currentText(),
-                "editsettings": str(self.chb_editSettings.isChecked()),
+                "editsettings": self.chb_editSettings.isChecked(),
                 "rendersettings": self.core.readYaml(
                     data=self.te_settings.toPlainText()
                 ),
-                "stateenabled": str(self.state.checkState(0)),
+                "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
             }
         )
 

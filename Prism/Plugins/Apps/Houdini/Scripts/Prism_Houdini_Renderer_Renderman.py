@@ -140,7 +140,7 @@ def executeRender(origin):
         hou.hipFile.save()
         origin.node.parm("executebackground").pressButton()
     else:
-        return "Rendering cancled."
+        return "Rendering canceled."
 
     return True
 

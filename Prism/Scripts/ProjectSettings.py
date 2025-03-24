@@ -220,14 +220,24 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         )
         icon = self.core.media.getColoredIcon(path)
         self.b_assetDepAdd.setIcon(icon)
+        self.b_addTaskPresetsAsset.setIcon(icon)
+        self.b_addTaskPresetsShot.setIcon(icon)
 
         path = os.path.join(
             self.core.prismRoot, "Scripts", "UserInterfacesPrism", "remove.png"
         )
         icon = self.core.media.getColoredIcon(path)
         self.b_assetDepRemove.setIcon(icon)
+        self.b_removeTaskPresetsAsset.setIcon(icon)
+        self.b_removeTaskPresetsShot.setIcon(icon)
+
         self.b_assetDepAdd.clicked.connect(self.addAssetDepartmentClicked)
         self.b_assetDepRemove.clicked.connect(self.removeAssetDepartmentClicked)
+        self.b_addTaskPresetsAsset.clicked.connect(self.addTaskPresetsAssetClicked)
+        self.b_removeTaskPresetsAsset.clicked.connect(self.removeTaskPresetsAssetClicked)
+        self.b_addTaskPresetsShot.clicked.connect(self.addTaskPresetsShotClicked)
+        self.b_removeTaskPresetsShot.clicked.connect(self.removeTaskPresetsShotClicked)
+
         self.tw_assetDepartments.verticalHeader().setSectionsMovable(True)
         self.tw_assetDepartments.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
         self.tw_assetDepartments.customContextMenuRequested.connect(self.assetDepsRightClicked)
@@ -262,6 +272,11 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         self.tw_shotDepartments.verticalHeader().sectionMoved.connect(self.shotDepartmentRowMoved)
         self.tw_shotDepartments.itemDoubleClicked.connect(self.shotDepartmentDoubleClicked)
         self.tw_shotDepartments.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
+
+        self.lw_taskPresetsAsset.customContextMenuRequested.connect(self.assetTaskPresetsRightClicked)
+        self.lw_taskPresetsAsset.itemDoubleClicked.connect(self.assetTaskPresetsDoubleClicked)
+        self.lw_taskPresetsShot.customContextMenuRequested.connect(self.shotTaskPresetsRightClicked)
+        self.lw_taskPresetsShot.itemDoubleClicked.connect(self.shotTaskPresetDoubleClicked)
 
         path = os.path.join(
             self.core.prismRoot, "Scripts", "UserInterfacesPrism", "import.png"
@@ -360,6 +375,7 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         self.chb_curPuseFps.toggled.connect(self.pfpsToggled)
         self.chb_prjResolution.toggled.connect(self.prjResolutionToggled)
         self.chb_curPRequirePublishComment.toggled.connect(self.requirePublishCommentToggled)
+        self.chb_curPproductTasks.toggled.connect(self.productTasksToggled)
         self.b_addExportPath.clicked.connect(self.addExportPathClicked)
         self.b_removeExportPath.clicked.connect(self.removeExportPathClicked)
         self.b_addRenderPath.clicked.connect(self.addRenderPathClicked)
@@ -369,6 +385,7 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         self.b_importSettings.clicked.connect(self.onImportSettingsClicked)
         self.b_exportSettings.clicked.connect(self.onExportSettingsClicked)
         self.b_reqPlugins.clicked.connect(self.onRequiredPluginsClicked)
+        self.b_expectedPrjPath.clicked.connect(self.onBrowseExpPathClicked)
         self.buttonBox.accepted.connect(self.saveSettings)
         self.buttonBox.button(QDialogButtonBox.Apply).clicked.connect(
             lambda: self.saveSettings(changeProject=False)
@@ -636,6 +653,17 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         self.e_reqPlugins.setText(", ".join(plugins))
 
     @err_catcher(name=__name__)
+    def onBrowseExpPathClicked(self):
+        windowTitle = "Select Expected Project Path"
+        startPath = self.e_expectedPrjPath.text() or getattr(self.core, "projectPath", "")
+        selectedPath = QFileDialog.getExistingDirectory(
+            self, windowTitle, startPath
+        )
+
+        if selectedPath:
+            self.e_expectedPrjPath.setText(self.core.fixPath(selectedPath))
+
+    @err_catcher(name=__name__)
     def restoreStructurePath(self, widget, default=False):
         key = widget.helpWidget.key
         path = self.core.projects.getTemplatePath(key, default=default)
@@ -727,6 +755,124 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         self.l_publishCommentChars.setEnabled(checked)
 
     @err_catcher(name=__name__)
+    def productTasksToggled(self, checked):
+        if checked:
+            if os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1":
+                template = "@entity_path@/Export/@department@/@task@/@product@"
+            else:
+                template = "@entity_path@/Export/@task@/@product@"
+        else:
+            template = "@entity_path@/Export/@product@"
+
+        yesAll = False
+        for widget in self.folderStructureWidgets:
+            if widget["key"] == "products":
+                if widget["widget"].text() != template:
+                    if yesAll:
+                        result = "Yes"
+                    else:
+                        msg = "Do you want to update your \"Products\" folder template to the recommended value?\n\nCurrent template:\n%s\n\nRecommended template:\n%s" % (widget["widget"].text(), template)
+                        result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"])
+                        if result == "Yes to all":
+                            result = "Yes"
+                            yesAll = True
+
+                    if result == "Yes":
+                        widget["widget"].setText(template)
+
+        if checked:
+            if os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1":
+                template = "@entity_path@/Renders/@department@/@task@/3dRender/@identifier@"
+            else:
+                template = "@entity_path@/Renders/@task@/3dRender/@identifier@"
+        else:
+            template = "@entity_path@/Renders/3dRender/@identifier@"
+
+        for widget in self.folderStructureWidgets:
+            if widget["key"] == "3drenders":
+                if widget["widget"].text() != template:
+                    if yesAll:
+                        result = "Yes"
+                    else:
+                        msg = "Do you want to update your \"3D Render\" folder template to the recommended value?\n\nCurrent template:\n%s\n\nRecommended template:\n%s" % (widget["widget"].text(), template)
+                        result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"])
+                        if result == "Yes to all":
+                            result = "Yes"
+                            yesAll = True
+
+                    if result == "Yes":
+                        widget["widget"].setText(template)
+
+        if checked:
+            if os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1":
+                template = "@entity_path@/Renders/@department@/@task@/2dRender/@identifier@"
+            else:
+                template = "@entity_path@/Renders/@task@/2dRender/@identifier@"
+        else:
+            template = "@entity_path@/Renders/2dRender/@identifier@"
+
+        for widget in self.folderStructureWidgets:
+            if widget["key"] == "2drenders":
+                if widget["widget"].text() != template:
+                    if yesAll:
+                        result = "Yes"
+                    else:
+                        msg = "Do you want to update your \"2D Render\" folder template to the recommended value?\n\nCurrent template:\n%s\n\nRecommended template:\n%s" % (widget["widget"].text(), template)
+                        result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"])
+                        if result == "Yes to all":
+                            result = "Yes"
+                            yesAll = True
+
+                    if result == "Yes":
+                        widget["widget"].setText(template)
+
+        if checked:
+            if os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1":
+                template = "@entity_path@/Renders/@department@/@task@/external/@identifier@"
+            else:
+                template = "@entity_path@/Renders/@task@/external/@identifier@"
+        else:
+            template = "@entity_path@/Renders/external/@identifier@"
+
+        for widget in self.folderStructureWidgets:
+            if widget["key"] == "externalMedia":
+                if widget["widget"].text() != template:
+                    if yesAll:
+                        result = "Yes"
+                    else:
+                        msg = "Do you want to update your \"External Media\" folder template to the recommended value?\n\nCurrent template:\n%s\n\nRecommended template:\n%s" % (widget["widget"].text(), template)
+                        result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"])
+                        if result == "Yes to all":
+                            result = "Yes"
+                            yesAll = True
+
+                    if result == "Yes":
+                        widget["widget"].setText(template)
+
+        if checked:
+            if os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1":
+                template = "@entity_path@/Renders/@department@/@task@/Playblasts/@identifier@"
+            else:
+                template = "@entity_path@/Renders/@task@/Playblasts/@identifier@"
+        else:
+            template = "@entity_path@/Playblasts/@identifier@"
+
+        for widget in self.folderStructureWidgets:
+            if widget["key"] == "playblasts":
+                if widget["widget"].text() != template:
+                    if yesAll:
+                        result = "Yes"
+                    else:
+                        msg = "Do you want to update your \"Playblasts\" folder template to the recommended value?\n\nCurrent template:\n%s\n\nRecommended template:\n%s" % (widget["widget"].text(), template)
+                        result = self.core.popupQuestion(msg, buttons=["Yes", "Yes to all", "No"])
+                        if result == "Yes to all":
+                            result = "Yes"
+                            yesAll = True
+
+                    if result == "Yes":
+                        widget["widget"].setText(template)
+
+    @err_catcher(name=__name__)
     def saveSettings(self, changeProject=True, configPath=None, export=False):
         logger.debug("save project settings")
 
@@ -749,6 +895,9 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             self.sp_prjResolutionWidth.value(),
             self.sp_prjResolutionHeight.value(),
         ]
+        cData["globals"]["versionPadding"] = self.sp_curPversionPadding.value()
+        cData["globals"]["framePadding"] = self.sp_curPframePadding.value()
+        cData["globals"]["prism_version"] = self.e_version.text()
         cData["globals"]["useMasterVersion"] = self.chb_curPuseMaster.isChecked()
         cData["globals"][
             "useMasterRenderVersion"
@@ -760,6 +909,9 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             "scenefileLocking"
         ] = self.chb_curPscenefileLocking.isChecked()
         cData["globals"][
+            "productTasks"
+        ] = self.chb_curPproductTasks.isChecked()
+        cData["globals"][
             "matchScenefileVersions"
         ] = self.chb_matchScenefileVersions.isChecked()
         cData["globals"][
@@ -767,6 +919,7 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         ] = self.chb_curPRequirePublishComment.isChecked()
         cData["globals"]["publishCommentLength"] = self.sp_publishComment.value()
         cData["globals"]["required_plugins"] = [x.strip() for x in self.e_reqPlugins.text().split(",") if x]
+        cData["globals"]["expectedPrjPath"] = self.e_expectedPrjPath.text()
         cData["changeProject"] = changeProject
         structure = self.getFolderStructure()
         if self.isValidStructure(structure):
@@ -943,6 +1096,12 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         if "resolution" in gblData:
             self.sp_prjResolutionWidth.setValue(gblData["resolution"][0])
             self.sp_prjResolutionHeight.setValue(gblData["resolution"][1])
+        if "versionPadding" in gblData:
+            self.sp_curPversionPadding.setValue(gblData["versionPadding"])
+        if "framePadding" in gblData:
+            self.sp_curPframePadding.setValue(gblData["framePadding"])
+        if "prism_version" in gblData:
+            self.e_version.setText(gblData["prism_version"])
         if "useMasterVersion" in gblData:
             self.chb_curPuseMaster.setChecked(gblData["useMasterVersion"])
         if "useMasterRenderVersion" in gblData:
@@ -954,6 +1113,10 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
         if "scenefileLocking" in gblData:
             self.chb_curPscenefileLocking.setChecked(
                 gblData["scenefileLocking"]
+            )
+        if "productTasks" in gblData:
+            self.chb_curPproductTasks.setChecked(
+                gblData["productTasks"]
             )
         if "matchScenefileVersions" in gblData:
             self.chb_matchScenefileVersions.setChecked(
@@ -967,6 +1130,8 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             self.sp_publishComment.setValue(gblData["publishCommentLength"])
         if "required_plugins" in gblData:
             self.e_reqPlugins.setText(", ".join(gblData["required_plugins"]))
+        if "expectedPrjPath" in gblData:
+            self.e_expectedPrjPath.setText(gblData["expectedPrjPath"])
         if "allowAdditionalTasks" in gblData:
             self.chb_allowAdditionalTasks.setChecked(gblData["allowAdditionalTasks"])
         if configData and "environmentVariables" in configData and configData["environmentVariables"]:
@@ -974,8 +1139,16 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
 
         self.refreshAssetDepartments(configData=configData)
         self.refreshShotDepartments(configData=configData)
+        self.refreshAssetTaskPresets(configData=configData)
+        self.refreshShotTaskPresets(configData=configData)
         self.refreshExportPaths(configData=configData)
         self.refreshRenderPaths(configData=configData)
+
+        iconPath = os.path.join(
+            self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+        )
+        icon = self.core.media.getColoredIcon(iconPath)
+        self.b_expectedPrjPath.setIcon(icon)
 
         self.pfpsToggled(self.chb_curPuseFps.isChecked())
         self.w_curPfps.setToolTip(
@@ -996,7 +1169,7 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             if configData is None:
                 configData = self.projectData
 
-            departments = self.core.projects.getAssetDepartments(configData=configData)
+            departments = self.core.projects.getAssetDepartments(configData=configData) or []
 
         self.tw_assetDepartments.setRowCount(0)
         for dep in departments:
@@ -1021,7 +1194,7 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             if configData is None:
                 configData = self.projectData
 
-            departments = self.core.projects.getShotDepartments(configData=configData)
+            departments = self.core.projects.getShotDepartments(configData=configData) or []
 
         self.tw_shotDepartments.setRowCount(0)
         for dep in departments:
@@ -1338,6 +1511,312 @@ class ProjectSettings(QDialog, ProjectSettings_ui.Ui_dlg_ProjectSettings):
             deps.append(self.tw_shotDepartments.item(rowDict[str(idx)], 0).data(Qt.UserRole))
 
         return deps
+
+    @err_catcher(name=__name__)
+    def addTaskPresetsAssetClicked(self):
+        self.saveAssetTaskPresets()
+        dlg_createTaskPreset = PrismWidgets.CreateTaskPresetDlg(
+            core=self.core, entity="asset", configData=self.projectData, parent=self
+        )
+
+        dlg_createTaskPreset.setWindowTitle("Create Asset Task Preset")
+        result = dlg_createTaskPreset.exec_()
+        if not result:
+            return
+
+        name = dlg_createTaskPreset.getName()
+        departments = dlg_createTaskPreset.getDepartments()
+        self.core.projects.addTaskPreset("asset", name, departments=departments)
+        self.refreshAssetTaskPresets()
+
+    @err_catcher(name=__name__)
+    def removeTaskPresetsAssetClicked(self):
+        items = self.lw_taskPresetsAsset.selectedItems()
+        rows = []
+        for item in items:
+            rows.append(self.lw_taskPresetsAsset.row(item))
+
+        for idx in sorted(rows, reverse=True):
+            self.lw_taskPresetsAsset.takeItem(idx)
+
+    @err_catcher(name=__name__)
+    def addTaskPresetsShotClicked(self):
+        self.saveShotTaskPresets()
+        dlg_createTaskPreset = PrismWidgets.CreateTaskPresetDlg(
+            core=self.core, entity="shot", configData=self.projectData, parent=self
+        )
+
+        dlg_createTaskPreset.setWindowTitle("Create Shot Task Preset")
+        result = dlg_createTaskPreset.exec_()
+        if not result:
+            return
+
+        name = dlg_createTaskPreset.getName()
+        departments = dlg_createTaskPreset.getDepartments()
+        self.core.projects.addTaskPreset("shot", name, departments=departments)
+        self.refreshShotTaskPresets()
+
+    @err_catcher(name=__name__)
+    def removeTaskPresetsShotClicked(self):
+        items = self.lw_taskPresetsShot.selectedItems()
+        rows = []
+        for item in items:
+            rows.append(self.lw_taskPresetsShot.row(item))
+
+        for idx in sorted(rows, reverse=True):
+            self.lw_taskPresetsShot.takeItem(idx)
+
+    @err_catcher(name=__name__)
+    def refreshAssetTaskPresets(self, presets=None, configData=None):
+        if presets is None:
+            if configData is None:
+                configData = self.projectData
+
+            presets = self.core.projects.getAssetTaskPresets(configData=configData)
+
+        self.lw_taskPresetsAsset.clear()
+        for preset in presets:
+            name = preset.get("name", "")
+            nameItem = QListWidgetItem(name)
+            nameItem.setData(Qt.UserRole, preset)
+            self.lw_taskPresetsAsset.addItem(nameItem)
+
+    @err_catcher(name=__name__)
+    def refreshShotTaskPresets(self, presets=None, configData=None):
+        if presets is None:
+            if configData is None:
+                configData = self.projectData
+
+            presets = self.core.projects.getShotTaskPresets(configData=configData)
+
+        self.lw_taskPresetsShot.clear()
+        for preset in presets:
+            name = preset.get("name", "")
+            nameItem = QListWidgetItem(name)
+            nameItem.setData(Qt.UserRole, preset)
+            self.lw_taskPresetsShot.addItem(nameItem)
+
+    @err_catcher(name=__name__)
+    def assetTaskPresetsRightClicked(self, pos):
+        rcmenu = QMenu(self)
+
+        exp = QAction("Add...", self)
+        exp.triggered.connect(self.addTaskPresetsAssetClicked)
+        rcmenu.addAction(exp)
+
+        clipAct = QAction("Edit...", self)
+        clipAct.triggered.connect(lambda: self.editAssetTaskPreset(self.lw_taskPresetsAsset.selectedItems()[0]))
+        rcmenu.addAction(clipAct)
+        if not len(self.lw_taskPresetsAsset.selectedItems()) == 1:
+            clipAct.setEnabled(False)
+
+        copAct = QAction("Remove", self)
+        copAct.triggered.connect(self.removeTaskPresetsAssetClicked)
+        rcmenu.addAction(copAct)
+        if not self.lw_taskPresetsAsset.selectedItems():
+            copAct.setEnabled(False)
+
+        clipAct = QAction("Move up", self)
+        clipAct.triggered.connect(self.moveUpAssetTaskPreset)
+        rcmenu.addAction(clipAct)
+        if 0 in [self.lw_taskPresetsAsset.row(i) for i in self.lw_taskPresetsAsset.selectedItems()] or not self.lw_taskPresetsAsset.selectedItems():
+            clipAct.setEnabled(False)
+
+        clipAct = QAction("Move down", self)
+        clipAct.triggered.connect(self.moveDownAssetTaskPreset)
+        rcmenu.addAction(clipAct)
+        if (self.lw_taskPresetsAsset.count()-1) in [self.lw_taskPresetsAsset.row(i) for i in self.lw_taskPresetsAsset.selectedItems()] or not self.lw_taskPresetsAsset.selectedItems():
+            clipAct.setEnabled(False)
+
+        clipAct = QAction("Restore defaults", self)
+        clipAct.triggered.connect(self.restoreAssetTaskPresetsTriggered)
+        rcmenu.addAction(clipAct)
+
+        rcmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def shotTaskPresetsRightClicked(self, pos):
+        rcmenu = QMenu(self)
+
+        exp = QAction("Add...", self)
+        exp.triggered.connect(self.addTaskPresetsShotClicked)
+        rcmenu.addAction(exp)
+
+        clipAct = QAction("Edit...", self)
+        clipAct.triggered.connect(lambda: self.editShotTaskPreset(self.lw_taskPresetsShot.selectedItems()[0]))
+        rcmenu.addAction(clipAct)
+        if not len(self.lw_taskPresetsShot.selectedItems()) == 1:
+            clipAct.setEnabled(False)
+
+        copAct = QAction("Remove", self)
+        copAct.triggered.connect(self.removeTaskPresetsShotClicked)
+        rcmenu.addAction(copAct)
+        if not self.lw_taskPresetsShot.selectedItems():
+            copAct.setEnabled(False)
+
+        clipAct = QAction("Move up", self)
+        clipAct.triggered.connect(self.moveUpShotTaskPreset)
+        rcmenu.addAction(clipAct)
+        if 0 in [self.lw_taskPresetsShot.row(i) for i in self.lw_taskPresetsShot.selectedItems()] or not self.lw_taskPresetsShot.selectedItems():
+            clipAct.setEnabled(False)
+
+        clipAct = QAction("Move down", self)
+        clipAct.triggered.connect(self.moveDownShotTaskPreset)
+        rcmenu.addAction(clipAct)
+        if (self.lw_taskPresetsShot.count()-1) in [self.lw_taskPresetsShot.row(i) for i in self.lw_taskPresetsShot.selectedItems()] or not self.lw_taskPresetsShot.selectedItems():
+            clipAct.setEnabled(False)
+
+        clipAct = QAction("Restore defaults", self)
+        clipAct.triggered.connect(self.restoreShotTaskPresetsTriggered)
+        rcmenu.addAction(clipAct)
+
+        rcmenu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def moveUpAssetTaskPreset(self):
+        items = self.lw_taskPresetsAsset.selectedItems()
+        rows = []
+        for item in items:
+            rows.append(self.lw_taskPresetsAsset.row(item))
+
+        presets = self.getAssetTaskPresets()
+        for idx in sorted(rows):
+            row = presets.pop(idx)
+            presets.insert(idx-1, row)
+
+        self.refreshAssetTaskPresets(presets=presets)
+        for idx in sorted(rows):
+            self.lw_taskPresetsAsset.setCurrentRow(idx-1)
+
+    @err_catcher(name=__name__)
+    def moveDownAssetTaskPreset(self):
+        items = self.lw_taskPresetsAsset.selectedItems()
+        rows = []
+        for item in items:
+            rows.append(self.lw_taskPresetsAsset.row(item))
+
+        presets = self.getAssetTaskPresets()
+        for idx in sorted(rows):
+            row = presets.pop(idx)
+            presets.insert(idx+1, row)
+
+        self.refreshAssetTaskPresets(presets=presets)
+        for idx in sorted(rows):
+            self.lw_taskPresetsAsset.setCurrentRow(idx+1)
+
+    @err_catcher(name=__name__)
+    def moveUpShotTaskPreset(self):
+        items = self.lw_taskPresetsShot.selectedItems()
+        rows = []
+        for item in items:
+            if item.column() == 0:
+                rows.append(self.lw_taskPresetsShot.row(item))
+
+        presets = self.getShotTaskPresets()
+        for idx in sorted(rows):
+            row = presets.pop(idx)
+            presets.insert(idx-1, row)
+
+        self.refreshShotTaskPresets(presets=presets)
+        for idx in sorted(rows):
+            self.lw_taskPresetsShot.setCurrentRow(idx-1)
+
+    @err_catcher(name=__name__)
+    def moveDownShotTaskPreset(self):
+        items = self.lw_taskPresetsShot.selectedItems()
+        rows = []
+        for item in items:
+            if item.column() == 0:
+                rows.append(self.lw_taskPresetsShot.row(item))
+
+        presets = self.getShotDepartments()
+        for idx in sorted(rows):
+            row = presets.pop(idx)
+            presets.insert(idx+1, row)
+
+        self.refreshShotTaskPresets(presets=presets)
+        for idx in sorted(rows):
+            self.lw_taskPresetsShot.setCurrentRow(idx+1)
+
+    @err_catcher(name=__name__)
+    def restoreAssetTaskPresetsTriggered(self):
+        configData = self.core.projects.getDefaultProjectSettings()
+        self.refreshAssetTaskPresets(configData=configData)
+
+    @err_catcher(name=__name__)
+    def restoreShotTaskPresetsTriggered(self):
+        configData = self.core.projects.getDefaultProjectSettings()
+        self.refreshShotTaskPresets(configData=configData)
+
+    @err_catcher(name=__name__)
+    def assetTaskPresetsDoubleClicked(self, item):
+        self.editAssetTaskPreset(item)
+
+    @err_catcher(name=__name__)
+    def editAssetTaskPreset(self, item):
+        self.saveAssetTaskPresets()
+        preset = item.data(Qt.UserRole)
+        self.dlg_preset = PrismWidgets.CreateTaskPresetDlg(core=self.core, entity="asset", configData=self.projectData, preset=preset, parent=self)
+        result = self.dlg_preset.exec_()
+        if not result:
+            return
+
+        departments = self.dlg_preset.getDepartments()
+        name = self.dlg_preset.getName()
+        preset = {
+            "name": name,
+            "departments": departments
+        }
+        item.setText(name)
+        item.setData(Qt.UserRole, preset)
+
+    @err_catcher(name=__name__)
+    def shotTaskPresetDoubleClicked(self, item):
+        self.editShotTaskPreset(item)
+
+    @err_catcher(name=__name__)
+    def editShotTaskPreset(self, item):
+        self.saveShotTaskPresets()
+        preset = item.data(Qt.UserRole)
+        self.dlg_preset = PrismWidgets.CreateTaskPresetDlg(core=self.core, entity="shot", configData=self.projectData, preset=preset, parent=self)
+        result = self.dlg_preset.exec_()
+        if not result:
+            return
+
+        departments = self.dlg_preset.getDepartments()
+        name = self.dlg_preset.getName()
+        preset = {
+            "name": name,
+            "departments": departments
+        }
+        item.setText(name)
+        item.setData(Qt.UserRole, preset)
+
+    @err_catcher(name=__name__)
+    def getAssetTaskPresets(self):
+        presets = []
+        for idx in range(self.lw_taskPresetsAsset.count()):
+            presets.append(self.lw_taskPresetsAsset.item(idx).data(Qt.UserRole))
+
+        return presets
+
+    @err_catcher(name=__name__)
+    def getShotTaskPresets(self):
+        presets = []
+        for idx in range(self.lw_taskPresetsShot.count()):
+            presets.append(self.lw_taskPresetsShot.item(idx).data(Qt.UserRole))
+
+        return presets
+
+    @err_catcher(name=__name__)
+    def saveAssetTaskPresets(self):
+        deps = self.getAssetTaskPresets()
+        self.core.projects.setTaskPresets("asset", deps, configData=self.projectData)
+
+    @err_catcher(name=__name__)
+    def saveShotTaskPresets(self):
+        deps = self.getShotTaskPresets()
+        self.core.projects.setTaskPresets("shot", deps, configData=self.projectData)
 
     @err_catcher(name=__name__)
     def validateFolderWidget(self, widget):

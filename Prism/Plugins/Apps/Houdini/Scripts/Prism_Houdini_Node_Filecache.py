@@ -52,7 +52,6 @@ class Prism_Houdini_Filecache(object):
         self.core = self.plugin.core
         self.initState = None
         self.executeBackground = False
-        self.nodeExecuted = False
         self.stateType = "Export"
         self.listType = "Export"
 
@@ -61,10 +60,12 @@ class Prism_Houdini_Filecache(object):
         return "prism::Filecache"
 
     @err_catcher(name=__name__)
-    def getFormats(self):
+    def getFormats(self, kwargs=None):
         blacklisted = [".hda", "ShotCam", "other", ".rs"]
         appFormats = self.core.appPlugin.outputFormats
         nodeFormats = [f for f in appFormats if f not in blacklisted]
+        if kwargs and kwargs["node"].parm("showUsdSettings").eval():
+            nodeFormats = [n for n in nodeFormats if "usd" in n]
 
         tokens = []
         for f in nodeFormats:
@@ -226,18 +227,36 @@ class Prism_Houdini_Filecache(object):
         self.plugin.showInStateManagerFromNode(kwargs)
 
     @err_catcher(name=__name__)
-    def openInExplorerFromNode(self, kwargs):
+    def openInFromNode(self, kwargs):
         state = self.getStateFromNode(kwargs)
         if not state:
             return
 
         folderpath = state.ui.l_pathLast.text()
-        if not os.path.exists(os.path.dirname(folderpath)):
-            impPath = self.getImportPath()
-            if os.path.exists(os.path.dirname(impPath)):
-                folderpath = impPath
 
-        self.core.openFolder(folderpath)
+        parent = self.core.messageParent
+        menu = QMenu(parent)
+
+        act_open = QAction("Open in Product Browser", parent)
+        act_open.triggered.connect(lambda: self.openInProductBrowser(folderpath))
+        menu.addAction(act_open)
+
+        act_open = QAction("Open in explorer", parent)
+        act_open.triggered.connect(lambda: self.core.openFolder(folderpath))
+        menu.addAction(act_open)
+
+        act_copy = QAction("Copy", parent)
+        act_copy.triggered.connect(lambda: self.core.copyToClipboard(folderpath, file=True))
+        menu.addAction(act_copy)
+
+        menu.exec_(QCursor.pos())
+
+    @err_catcher(name=__name__)
+    def openInProductBrowser(self, path):
+        self.core.projectBrowser()
+        self.core.pb.showTab("Products")
+        data = self.core.paths.getCachePathData(path)
+        self.core.pb.productBrowser.navigateToProduct(data["product"], entity=data)
 
     @err_catcher(name=__name__)
     def refreshNodeUi(self, node, state, forceCook=False):
@@ -283,7 +302,8 @@ class Prism_Houdini_Filecache(object):
         else:
             parent3 = None
 
-        lopChild = bool(parent3 and node.parm("showLopFetch") and self.core.getPlugin("USD"))
+        usdPlug = self.core.getPlugin("USD")
+        lopChild = bool(parent3 and node.parm("showLopFetch") and usdPlug)
         node.parm("showLopFetch").set(lopChild)
 
     @err_catcher(name=__name__)
@@ -307,6 +327,10 @@ class Prism_Houdini_Filecache(object):
     def getRenderNode(self, node):
         if node.parm("format").evalAsString() == ".abc":
             ropName = "write_alembic"
+        elif node.parm("format").evalAsString() == ".fbx":
+            ropName = "write_fbx"
+        elif node.parm("format").evalAsString() in [".usda", ".usdc"]:
+            ropName = "write_usd"
         else:
             ropName = "write_geo"
 
@@ -316,30 +340,57 @@ class Prism_Houdini_Filecache(object):
     @err_catcher(name=__name__)
     def executeNode(self, node):
         rop = self.getRenderNode(node)
-
-        if self.executeBackground:
-            parmName = "executebackground"
-        else:
-            parmName = "execute"
-
-        rop.parm(parmName).pressButton()
-        QCoreApplication.processEvents()
         self.updateLatestVersion(node)
-        node.node("switch_abc").cook(force=True)
+        if node.parm("useWedging").eval():
+            if node.parm("nextVersionWrite").eval():
+                node.parm("nextVersionWrite").set(False)
+                enableNext = True
+            else:
+                enableNext = False
+
+            import nodegraphtopui
+            topnet = node.node("wedging")
+            node.parm("useWedging").set(0)
+            node.wedgeInProgress = True
+            nodegraphtopui.dirtyAll(topnet, False)
+            topnet.cookOutputWorkItems(block=True)
+            node.parm("useWedging").set(1)
+            node.wedgeInProgress = False
+            node.nodeExecuted = True
+            if enableNext:
+                node.parm("nextVersionWrite").set(True)
+
+        else:
+            if self.executeBackground:
+                parmName = "executebackground"
+            else:
+                parmName = "execute"
+
+            rop.parm(parmName).pressButton()
+            QCoreApplication.processEvents()
+
+        node.node("switch_format").cook(force=True)
         if (
             not self.executeBackground
             and node.parm("showSuccessPopup").eval()
-            and self.nodeExecuted
+            and getattr(node, "nodeExecuted", False)
             and not rop.errors()
+            and not getattr(node, "wedgeInProgress", False)
         ):
             self.core.popup(
                 "Finished caching successfully.", severity="info", modal=False
             )
 
+        if not getattr(node, "wedgeInProgress", False):
+            self.updateLatestVersion(node)
+
         if self.executeBackground:
             return "background"
         else:
-            return True
+            if node.parm("useWedging").eval():
+                return "wedges"
+            else:
+                return True
 
     @err_catcher(name=__name__)
     def executePressed(self, kwargs, background=False):
@@ -360,7 +411,11 @@ class Prism_Houdini_Filecache(object):
         )
         state.ui.gb_submit.setChecked(False)
 
-        self.nodeExecuted = True
+        if getattr(state.ui.node, "wedgeInProgress", False):
+            saveScene = False
+            sanityChecks = False
+
+        state.ui.node.nodeExecuted = True
         self.executeBackground = background
         sm.publish(
             executeState=True,
@@ -373,7 +428,10 @@ class Prism_Houdini_Filecache(object):
             versionWarning=False,
         )
         self.executeBackground = False
-        self.nodeExecuted = False
+        state.ui.node.nodeExecuted = False
+        if not kwargs["node"].parm("autorefresh").eval() and kwargs["node"].parm("latestVersionRead").eval():
+            self.refreshImportPath(kwargs)
+
         self.reload(kwargs)
 
     @err_catcher(name=__name__)
@@ -402,6 +460,29 @@ class Prism_Houdini_Filecache(object):
     @err_catcher(name=__name__)
     def latestChanged(self, kwargs):
         self.updateLatestVersion(kwargs["node"])
+        if not kwargs["node"].parm("autorefresh").eval():
+            self.refreshImportPath(kwargs)
+
+    @err_catcher(name=__name__)
+    def masterChanged(self, kwargs):
+        self.updateLatestVersion(kwargs["node"])
+        if not kwargs["node"].parm("autorefresh").eval():
+            self.refreshImportPath(kwargs)
+
+    @err_catcher(name=__name__)
+    def readVersionChanged(self, kwargs):
+        if not kwargs["node"].parm("autorefresh").eval():
+            self.refreshImportPath(kwargs)
+
+    @err_catcher(name=__name__)
+    def useWedgeChanged(self, kwargs):
+        if not kwargs["node"].parm("autorefresh").eval():
+            self.refreshImportPath(kwargs)
+
+    @err_catcher(name=__name__)
+    def wedgeChanged(self, kwargs):
+        if not kwargs["node"].parm("autorefresh").eval():
+            self.refreshImportPath(kwargs)
 
     @err_catcher(name=__name__)
     def getReadVersionFromNode(self, node):
@@ -479,7 +560,7 @@ class Prism_Houdini_Filecache(object):
             stateData = {
                 "statename": "Filecaches",
                 "listtype": "Export",
-                "stateenabled": "PySide2.QtCore.Qt.CheckState.Checked",
+                "stateenabled": 2,
                 "stateexpanded": True,
             }
             state = sm.createState("Folder", stateData=stateData)
@@ -579,6 +660,9 @@ class Prism_Houdini_Filecache(object):
                     self.plugin.setNodeParm(kwargs["node"], "readWedge", True, clear=True)
                     self.plugin.setNodeParm(kwargs["node"], "readWedgeNum", int(data["wedge"]), clear=True)
 
+            if not kwargs["node"].parm("autorefresh").eval():
+                self.refreshImportPath(kwargs)
+
         return version
 
     @err_catcher(name=__name__)
@@ -666,7 +750,7 @@ class Prism_Houdini_Filecache(object):
         return node.parm("task").unexpandedString()
 
     @err_catcher(name=__name__)
-    def getImportPath(self):
+    def getImportPath(self, expand=True):
         if hou.hipFile.isLoadingHipFile():
             return ""
 
@@ -688,14 +772,17 @@ class Prism_Houdini_Filecache(object):
             wedge = None
 
         if version == "latest":
-            path = self.core.products.getLatestVersionpathFromProduct(product, entity=entity, wedge=wedge)
+            includeMaster = node.parm("includeMaster").eval()
+            path = self.core.products.getLatestVersionpathFromProduct(product, includeMaster=includeMaster, entity=entity, wedge=wedge)
         else:
             path = self.core.products.getVersionpathFromProductVersion(product, version, entity=entity, wedge=wedge)
 
         if path:
             path = path.replace("\\", "/")
             path = self.core.appPlugin.detectCacheSequence(path)
-            path = hou.text.expandString(path)
+            path = self.core.appPlugin.getPathRelativeToProject(path) if self.core.appPlugin.getUseRelativePath() else path
+            if expand:
+                path = hou.text.expandString(path)
         else:
             path = ""
 
@@ -719,8 +806,21 @@ class Prism_Houdini_Filecache(object):
         return names
 
     @err_catcher(name=__name__)
+    def autoRefreshToggled(self, kwargs):
+        auto = kwargs["node"].parm("autorefresh").eval()
+        if auto:
+            kwargs["node"].parm("importPath").setExpression("hou.phm().getImportPath()", language=hou.exprLanguage.Python)
+        else:
+            self.refreshImportPath(kwargs)
+
+    @err_catcher(name=__name__)
+    def refreshImportPath(self, kwargs):
+        path = self.getImportPath(expand=False)
+        self.plugin.setNodeParm(kwargs["node"], "importPath", path, clear=True)
+
+    @err_catcher(name=__name__)
     def reload(self, kwargs):
-        isAbc = kwargs["node"].parm("switch_abc/input").eval()
+        isAbc = kwargs["node"].parm("switch_format/input").eval()
         if isAbc:
             kwargs["node"].parm("read_alembic/reload").pressButton()
         else:

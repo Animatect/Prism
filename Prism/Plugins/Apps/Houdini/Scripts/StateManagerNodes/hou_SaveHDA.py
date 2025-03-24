@@ -36,13 +36,9 @@ import os
 import time
 import platform
 
-try:
-    from PySide2.QtCore import *
-    from PySide2.QtGui import *
-    from PySide2.QtWidgets import *
-except:
-    from PySide.QtCore import *
-    from PySide.QtGui import *
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 
 import hou
 import hou_Export
@@ -129,7 +125,10 @@ class SaveHDAClass(hou_Export.ExportClass):
             self.l_pathLast.setText(lePath)
             self.l_pathLast.setToolTip(lePath)
         if "stateenabled" in data:
-            self.state.setCheckState(0, Qt.CheckState(data["stateenabled"]))
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         self.nameChanged(self.e_name.text())
         self.core.callback("onStateSettingsLoaded", self, data)
@@ -139,7 +138,7 @@ class SaveHDAClass(hou_Export.ExportClass):
         self.e_name.textChanged.connect(self.nameChanged)
         self.e_name.editingFinished.connect(self.stateManager.saveStatesToScene)
         self.b_changeTask.clicked.connect(self.changeTask)
-        self.cb_outPath.activated[str].connect(self.stateManager.saveStatesToScene)
+        self.cb_outPath.activated.connect(self.stateManager.saveStatesToScene)
         self.chb_projectHDA.stateChanged.connect(
             lambda x: self.w_outPath.setEnabled(not x)
         )
@@ -428,7 +427,8 @@ class SaveHDAClass(hou_Export.ExportClass):
         self.l_pathLast.setToolTip(outputName)
 
         self.stateManager.saveStatesToScene()
-        hou.hipFile.save()
+        if self.stateManager.actionSaveDuringPub.isChecked():
+            hou.hipFile.save()
 
         version = int(hVersion[1:]) if hVersion else None
         result = self.exportHDA(ropNode, outputName, version)
@@ -522,7 +522,7 @@ class SaveHDAClass(hou_Export.ExportClass):
             "externalReferences": self.chb_externalReferences.isChecked(),
             "blackboxhda": self.chb_blackboxHDA.isChecked(),
             "lastexportpath": self.l_pathLast.text(),
-            "stateenabled": int(self.state.checkState(0)),
+            "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
         }
 
         return stateProps

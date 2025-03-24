@@ -27,8 +27,7 @@ Download the installer from the [website](https://prism-pipeline.com/downloads/)
 (This version allows you to automatically update Prism and install new plugins)
 
 or to install Prism manually:
-
-* Download or clone this repository and download the [Prism dependencies](https://www.dropbox.com/scl/fi/zh9t0im2qsd6mtlmpd9vs/Prism_dependencies_v2.0.0.zip?rlkey=o0lhrixa5klm3bell35wuhvsy&dl=1).
+* Download or clone this repository and download the [Prism dependencies](https://www.dropbox.com/scl/fi/bmgsht89nb9u04sqprzrp/Prism_dependencies_v2.0.5.zip?rlkey=wy0rtw56chky6kt1mnxnept0t&st=jkiho4o9&dl=1).
 
 * Extract the dependencies and copy the extracted folders into the "Prism" folder of this repository.
 

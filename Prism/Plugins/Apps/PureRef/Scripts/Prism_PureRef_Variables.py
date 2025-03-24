@@ -37,7 +37,7 @@ import os
 
 class Prism_PureRef_Variables(object):
     def __init__(self, core, plugin):
-        self.version = "v2.0.0"
+        self.version = "v2.0.10"
         self.pluginName = "PureRef"
         self.pluginType = "App"
         self.appShortName = "PureRef"
@@ -47,7 +47,7 @@ class Prism_PureRef_Variables(object):
         self.appSpecificFormats = self.sceneFormats
         self.appColor = [200, 200, 200]
         self.renderPasses = []
-        self.platforms = ["Windows"]
+        self.platforms = ["Windows", "Linux"]
         self.pluginDirectory = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
         self.hasIntegration = False
         self.appIcon = os.path.join(self.pluginDirectory, "Resources", "PureRef.ico")

@@ -60,8 +60,8 @@ class Projects(object):
         self.dlg_settings = None
         self.extraStructureItems = OrderedDict([])
         self.environmentVariables = []
-        self.previewWidth = 640
-        self.previewHeight = 360
+        self.previewWidth = 1280
+        self.previewHeight = 720
 
     @err_catcher(name=__name__)
     def setProject(self, startup=None, openUi=""):
@@ -383,6 +383,15 @@ class Projects(object):
             dft=False,
             configPath=configPath,
         )
+        expPath = self.core.getConfig(
+            "globals",
+            "expectedPrjPath",
+            dft="",
+            configPath=configPath,
+        )
+        if expPath and expPath.strip("\\") != self.core.projectPath.strip("\\") and os.getenv("PRISM_SKIP_PROJECT_PATH_WARNING", "0") != "1":
+            msg = "This project should be loaded from the following path:\n\n%s\n\nCurrently it is loaded from this path:\n\n%s\n\nContinuing can have unexpected consequences." % (expPath, self.core.projectPath)
+            self.core.popup(msg)
 
         self.core._scenePath = None
         self.core._shotPath = None
@@ -400,6 +409,8 @@ class Projects(object):
                 function=self.core.products.checkMasterVersions,
                 label="Check Product Master Versions..."
             )
+        else:
+            self.core.entities.removeEntityAction("masterVersionCheckProducts")
 
         if self.core.mediaProducts.getUseMaster():
             self.core.entities.addEntityAction(
@@ -408,6 +419,8 @@ class Projects(object):
                 function=self.core.mediaProducts.checkMasterVersions,
                 label="Check Media Master Versions..."
             )
+        else:
+            self.core.entities.removeEntityAction("masterVersionCheckMedia")
 
         logger.debug("Loaded project " + self.core.projectPath)
 
@@ -687,6 +700,8 @@ class Projects(object):
             {"name": "Lighting", "abbreviation": "lgt", "defaultTasks": ["Lighting"]},
             {"name": "Compositing", "abbreviation": "cmp", "defaultTasks": ["Compositing"]},
         ]
+        dftTaskPresetsAsset = self.getDftAssetTaskPresets()
+        dftTaskPresetsShot = self.getDftShotTaskPresets()
 
         structure = self.getStructureValues(self.getDefaultProjectStructure())
         settings = OrderedDict(
@@ -699,6 +714,8 @@ class Projects(object):
                             ("prism_version", self.core.version),
                             ("departments_asset", dftDepsAsset),
                             ("departments_shot", dftDepsShot),
+                            ("taskpresets_asset", dftTaskPresetsAsset),
+                            ("taskpresets_shot", dftTaskPresetsShot),
                             ("uselocalfiles", False),
                             ("track_dependencies", "publish"),
                             ("checkframerange", True),
@@ -717,6 +734,10 @@ class Projects(object):
                                     "640x360",
                                 ],
                             ),
+                            ("requirePublishComment", True),
+                            ("publishCommentLength", 3),
+                            ("defaultImportStateName", "{entity}_{product}_{version}"),
+                            ("useStrictAssetDetection", False),
                         ]
                     ),
                 ),
@@ -766,20 +787,21 @@ class Projects(object):
 
         # check valid project name
         if not prjName:
-            self.core.popup("The project name is invalid")
+            self.core.popup("The project name is invalid.")
             return
 
         # create project folder
         if not os.path.isabs(prjPath):
-            self.core.popup("The project path is invalid")
+            self.core.popup("The project path is invalid.")
             return
 
         if not os.path.exists(prjPath):
             try:
                 os.makedirs(prjPath)
-            except:
-                self.core.popup("The project folder could not be created", parent=parent)
+            except Exception as e:
+                self.core.popup("The project folder could not be created.\n\n(%s)" % str(e), parent=parent)
                 return
+
         elif os.listdir(prjPath):
             msg = "The project folder is not empty. How do you want to continue?"
             result = self.core.popupQuestion(
@@ -1512,21 +1534,24 @@ class Projects(object):
     @err_catcher(name=__name__)
     def resolveStructurePath(self, path, context=None, structure=None, addProjectPath=True, fillContextKeys=True, fallback=None):
         context = context or {}
+        prjPath = None
         if "project_path" in context:
             if structure is None:
                 prjPath = self.core.convertPath(context["project_path"], "global")
-        elif addProjectPath:
-            context["project_path"] = os.path.normpath(self.core.projectPath)
-            prjPath = context["project_path"]
-        else:
-            if structure is None:
-                prjPath = os.path.normpath(self.core.projectPath)
+        elif getattr(self.core, "projectPath", None):
+            if addProjectPath:
+                context["project_path"] = os.path.normpath(self.core.projectPath)
+                prjPath = context["project_path"]
+            else:
+                if structure is None:
+                    prjPath = os.path.normpath(self.core.projectPath)
 
         if "project_path" in context and "project_name" not in context:
-            if hasattr(self.core, "projectPath") and context["project_path"] == self.core.projectPath:
+            glbPrjPath = self.core.convertPath(context["project_path"], "global")
+            if hasattr(self.core, "projectPath") and glbPrjPath == self.core.projectPath:
                 context["project_name"] = self.core.projectName
             else:
-                cfgPath = self.core.configs.getProjectConfigPath(context["project_path"])
+                cfgPath = self.core.configs.getProjectConfigPath(glbPrjPath)
                 context["project_name"] = self.core.getConfig("globals", "project_name", configPath=cfgPath) or ""
 
         if structure is None:
@@ -1931,8 +1956,9 @@ class Projects(object):
 
         if not deps:
             deps = self.getProjectDepartments()
-            deps = [{"name": d[1], "abbreviation": d[0], "defaultTasks": [d[1]]} for d in list(deps.items())]
-            self.setDepartments("asset", deps, configData)
+            if deps:
+                deps = [{"name": d[1], "abbreviation": d[0], "defaultTasks": [d[1]]} for d in list(deps.items())]
+                self.setDepartments("asset", deps, configData)
 
         return deps
 
@@ -1952,8 +1978,9 @@ class Projects(object):
 
         if not deps:
             deps = self.getProjectDepartments()
-            deps = [{"name": d[1], "abbreviation": d[0], "defaultTasks": [d[1]]} for d in list(deps.items())]
-            self.setDepartments("shot", deps, configData)
+            if deps:
+                deps = [{"name": d[1], "abbreviation": d[0], "defaultTasks": [d[1]]} for d in list(deps.items())]
+                self.setDepartments("shot", deps, configData)
 
         return deps
 
@@ -1995,6 +2022,213 @@ class Projects(object):
         else:
             self.core.setConfig(
                 "globals", key, departments, configPath=self.core.prismIni
+            )
+
+    @err_catcher(name=__name__)
+    def getAssetTaskPresets(self, configData=None):
+        if configData:
+            presets = configData.get("globals", {}).get("taskpresets_asset")
+        else:
+            presets = self.core.getConfig(
+                "globals", "taskpresets_asset", configPath=self.core.prismIni
+            )
+
+        if presets is None:
+            presets = self.getDftAssetTaskPresets()
+            self.setTaskPresets("asset", presets, configData)
+
+        try:
+            presets = list(presets)
+        except:
+            presets = []
+
+        return presets
+
+    @err_catcher(name=__name__)
+    def getDftAssetTaskPresets(self):
+        presets = [
+            {
+                "name": "All",
+                "departments": [
+                    {
+                        "name": "Concept",
+                        "tasks": ["Concept"]
+                    },
+                    {
+                        "name": "Modeling",
+                        "tasks": ["Modeling"]
+                    },
+                    {
+                        "name": "Surfacing",
+                        "tasks": ["Surfacing"]
+                    },
+                    {
+                        "name": "Rigging",
+                        "tasks": ["Rigging"]
+                    }
+                ]
+            },
+            {
+                "name": "Character",
+                "departments": [
+                    {
+                        "name": "Modeling",
+                        "tasks": ["Modeling"]
+                    },
+                    {
+                        "name": "Surfacing",
+                        "tasks": ["Surfacing"]
+                    },
+                    {
+                        "name": "Rigging",
+                        "tasks": ["Rigging"]
+                    }
+                ]
+            },
+            {
+                "name": "Prop",
+                "departments": [
+                    {
+                        "name": "Modeling",
+                        "tasks": ["Modeling"]
+                    },
+                    {
+                        "name": "Surfacing",
+                        "tasks": ["Surfacing"]
+                    }
+                ]
+            },
+            {
+                "name": "Environment",
+                "departments": [
+                    {
+                        "name": "Modeling",
+                        "tasks": ["Layout"]
+                    }
+                ]
+            }
+        ]
+        return presets
+
+    @err_catcher(name=__name__)
+    def getShotTaskPresets(self, configData=None):
+        if configData:
+            presets = configData.get("globals", {}).get("taskpresets_shot")
+        else:
+            presets = self.core.getConfig(
+                "globals", "taskpresets_shot", configPath=self.core.prismIni
+            )
+
+        if presets is None:
+            presets = self.getDftShotTaskPresets()
+            self.setTaskPresets("shot", presets, configData)
+
+        try:
+            presets = list(presets)
+        except:
+            presets = []
+
+        return presets
+
+    @err_catcher(name=__name__)
+    def getDftShotTaskPresets(self):
+        presets = [
+            {
+                "name": "All",
+                "departments": [
+                    {
+                        "name": "Layout",
+                        "tasks": ["Layout"]
+                    },
+                    {
+                        "name": "Animation",
+                        "tasks": ["Animation"]
+                    },
+                    {
+                        "name": "FX",
+                        "tasks": ["Effects"]
+                    },
+                    {
+                        "name": "CharFX",
+                        "tasks": ["CharacterEffects"]
+                    },
+                    {
+                        "name": "Lighting",
+                        "tasks": ["Lighting"]
+                    },
+                    {
+                        "name": "Compositing",
+                        "tasks": ["Compositing"]
+                    }
+                ]
+            },
+            {
+                "name": "Simple",
+                "departments": [
+                    {
+                        "name": "Animation",
+                        "tasks": ["Animation"]
+                    },
+                    {
+                        "name": "Lighting",
+                        "tasks": ["Lighting"]
+                    },
+                    {
+                        "name": "Compositing",
+                        "tasks": ["Compositing"]
+                    }
+                ]
+            },
+            {
+                "name": "Minimal",
+                "departments": [
+                    {
+                        "name": "Lighting",
+                        "tasks": ["Lighting"]
+                    }
+                ]
+            }
+        ]
+        return presets
+
+    @err_catcher(name=__name__)
+    def addTaskPreset(self, entity, name, departments=None, configData=None):
+        departments = departments or []
+        if entity == "asset":
+            key = "taskpresets_asset"
+        elif entity in ["shot", "sequence"]:
+            key = "taskpresets_shot"
+
+        if configData:
+            presets = configData.get("globals", {}).get(key, [])
+        else:
+            presets = self.core.getConfig(
+                "globals", key, configPath=self.core.prismIni, dft=[]
+            )
+
+        validPresets = []
+        for preset in presets:
+            if preset["name"] != name:
+                validPresets.append(preset)
+
+        preset = {"name": name, "departments": departments}
+        validPresets.append(preset)
+
+        self.setTaskPresets(entity, validPresets, configData)
+        return preset
+
+    @err_catcher(name=__name__)
+    def setTaskPresets(self, entity, presets, configData=None):
+        if entity == "asset":
+            key = "taskpresets_asset"
+        elif entity in ["shot", "sequence"]:
+            key = "taskpresets_shot"
+
+        if configData:
+            configData["globals"][key] = presets
+        else:
+            self.core.setConfig(
+                "globals", key, presets, configPath=self.core.prismIni
             )
 
     @err_catcher(name=__name__)
@@ -2259,7 +2493,7 @@ class Projects(object):
         def __init__(self, parent, data, minHeight=200, allowRemove=True, previewScale=1, useWidgetWidth=False):
             super(Projects.ProjectWidget, self).__init__()
             self.core = parent.core
-            self.parent = parent
+            self._parent = parent
             self.data = data
             self.status = "deselected"
             self.minHeight = minHeight
@@ -2367,10 +2601,10 @@ class Projects(object):
                 self.l_icon.setPixmap(icon)
             else:
                 self.setLoadingPreview()
-                if self.parent.isVisible():
+                if self._parent.isVisible():
                     self.updatePreview_threaded()
                 else:
-                    self.parent.signalShowing.connect(self.updatePreview_threaded)
+                    self._parent.signalShowing.connect(self.updatePreview_threaded)
 
             name = self.getDisplayName()
             self.l_name.setText(name)
@@ -2378,7 +2612,7 @@ class Projects(object):
         @err_catcher(name=__name__)
         def updatePreview(self, load=True):
             if hasattr(self, "loadingGif"):
-                self.loadingGif.setScaledSize(QSize(self.l_preview.width(), self.l_preview.width() / (300/169.0)))
+                self.loadingGif.setScaledSize(QSize(self.l_preview.width(), int(self.l_preview.width() / (300/169.0))))
 
             ppixmap = self.getPreviewImage(load=load)
             if not ppixmap or ppixmap == "loading":
@@ -2397,7 +2631,7 @@ class Projects(object):
             self.loadingGif = QMovie(path, QByteArray(), self) 
             self.loadingGif.setCacheMode(QMovie.CacheAll) 
             self.loadingGif.setSpeed(100) 
-            self.loadingGif.setScaledSize(QSize(self.l_preview.width(), self.l_preview.width() / (300/169.0)))
+            self.loadingGif.setScaledSize(QSize(self.l_preview.width(), int(self.l_preview.width() / (300/169.0))))
             self.l_preview.setMovie(self.loadingGif)
             self.loadingGif.start()
 
@@ -2436,7 +2670,11 @@ class Projects(object):
             if "icon" not in self.data:
                 return
 
-            icon = self.core.media.getColoredIcon(self.data["icon"], force=True)
+            if self.core.isStr(self.data["icon"]):
+                icon = self.core.media.getColoredIcon(self.data["icon"], force=True)
+            else:
+                icon = self.data["icon"]
+
             pixmap = icon.pixmap(30, 30)
             return pixmap
 
@@ -2538,9 +2776,9 @@ class Projects(object):
 
         @err_catcher(name=__name__)
         def getContextMenu(self):
-            menu = QMenu(self.parent)
+            menu = QMenu(self._parent)
 
-            selectedProjects = self.parent.getSelectedItems()
+            selectedProjects = self._parent.getSelectedItems()
 
             copAct = QAction("Capture project image", self)
             copAct.triggered.connect(self.captureProjectPreview)
@@ -2561,28 +2799,33 @@ class Projects(object):
                 clipAct.setEnabled(False)
 
             if "source" in self.data and self.data["source"] == "recent" and self.allowRemove:
-                expAct = QAction("Delete from recent", self.parent)
+                expAct = QAction("Delete from recent", self._parent)
                 expAct.triggered.connect(self.deleteRecent)
                 menu.addAction(expAct)
 
-            expAct = QAction("Open in Explorer", self.parent)
+            expAct = QAction("Open in Explorer", self._parent)
             expAct.triggered.connect(self.onOpenExplorerClicked)
             menu.addAction(expAct)
 
-            copAct = QAction("Copy path", self.parent)
+            copAct = QAction("Copy path", self._parent)
             copAct.triggered.connect(self.onCopyPathClicked)
             menu.addAction(copAct)
+
+            self.core.callback(
+                name="projectWidgetGetContextMenu",
+                args=[self, menu],
+            )
             return menu
 
         @err_catcher(name=__name__)
         def onOpenExplorerClicked(self):
-            items = self.parent.getSelectedItems()
+            items = self._parent.getSelectedItems()
             for item in items:
                 self.core.openFolder(item.data["configPath"])
 
         @err_catcher(name=__name__)
         def onCopyPathClicked(self):
-            items = self.parent.getSelectedItems()
+            items = self._parent.getSelectedItems()
             text = os.pathsep.join(item.data["configPath"] for item in items)
             self.core.copyToClipboard(text)
 
@@ -2592,13 +2835,16 @@ class Projects(object):
                 return
 
             menu = self.getContextMenu()
-            if hasattr(self.parent, "allowClose"):
-                self.parent.allowClose = False
+            if not menu or menu.isEmpty():
+                return
+
+            if hasattr(self._parent, "allowClose"):
+                self._parent.allowClose = False
 
             menu.exec_(QCursor.pos())
 
-            if hasattr(self.parent, "allowClose"):
-                self.parent.allowClose = True
+            if hasattr(self._parent, "allowClose"):
+                self._parent.allowClose = True
 
         @err_catcher(name=__name__)
         def browseProjectPreview(self):
@@ -2649,7 +2895,7 @@ class Projects(object):
         def pasteProjectPreviewFromClipboard(self):
             pmap = self.core.media.getPixmapFromClipboard()
             if not pmap:
-                self.core.popup("No image in clipboard.", parent=self.parent)
+                self.core.popup("No image in clipboard.", parent=self._parent)
                 return
 
             pmap = self.core.media.scalePixmap(pmap, width=self.core.projects.previewWidth, height=self.core.projects.previewHeight, fitIntoBounds=False)
@@ -2661,7 +2907,7 @@ class Projects(object):
 
         @err_catcher(name=__name__)
         def deleteRecent(self):
-            items = self.parent.getSelectedItems()
+            items = self._parent.getSelectedItems()
             for item in items:
                 self.core.projects.setRecentPrj(item.data["configPath"], action="remove")
             
@@ -2677,7 +2923,7 @@ class Projects(object):
                 painter.setBrush(brush)
                 painter.setPen(Qt.NoPen)
                 painter.drawRoundedRect(1, 1, self.width()-2, self.height(), 10, 10)
-                painter.drawRect(1, self.height() / 2, self.width()-2, self.height())
+                painter.drawRect(1, int(self.height() / 2), self.width()-2, self.height())
             else:
                 super(Projects.RoundedLabel, self).paintEvent(event)
 

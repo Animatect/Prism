@@ -307,13 +307,15 @@ class PrismTray:
 
         pythonPath = self.core.getPythonPath(executable="Prism")
         filepath = os.path.join(self.core.prismRoot, "Scripts", "PrismTray.py")
-        cmd = """start "" "%s" "%s" showSplash""" % (pythonPath, filepath)
+        cmd = """start "" "%s" "%s" showSplash ignore_pid=%s""" % (pythonPath, filepath, os.getpid())
         subprocess.Popen(cmd, cwd=self.core.prismRoot, shell=True)
         sys.exit(0)
 
     def exitTray(self):
-        self.listenerThread.shutDown()
-        qApp.quit()
+        if hasattr(self, "listenerThread"):
+            self.listenerThread.shutDown()
+
+        QApplication.instance().quit()
 
 
 class ListenerThread(QThread):
@@ -383,10 +385,16 @@ class SenderThread(QThread):
 def isAlreadyRunning():
     if platform.system() == "Windows":
         coreProc = []
+        ignoredPids = [os.getpid()]
+        for arg in sys.argv:
+            if arg.startswith("ignore_pid="):
+                pid = int(arg.split("=")[-1])
+                ignoredPids.append(pid)
+
         for proc in psutil.process_iter():
             try:
                 if (
-                    proc.pid != os.getpid()
+                    proc.pid not in ignoredPids
                     and os.path.basename(proc.exe()) == "Prism.exe"
                     and proc.username() == psutil.Process(os.getpid()).username()
                 ):
@@ -398,18 +406,145 @@ def isAlreadyRunning():
     return False
 
 
-if __name__ == "__main__":
-    qApp = QApplication(sys.argv)
-    qApp.setQuitOnLastWindowClosed(False)
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(
-            None,
-            "PrismTray",
-            "Could not launch PrismTray. Tray icons are not supported on this OS.",
-        )
-        sys.exit(1)
+def findPrismProcesses():
+    procs = []
+    exes = [
+        "Prism.exe",
+    ]
+    try:
+        import psutil
+    except Exception as e:
+        pass
+    else:
+        ignoredPids = [os.getpid()]
+        for arg in sys.argv:
+            if arg.startswith("ignore_pid="):
+                pid = int(arg.split("=")[-1])
+                ignoredPids.append(pid)
 
+        for proc in psutil.process_iter():
+            try:
+                if proc.pid in ignoredPids:
+                    continue
+
+                try:
+                    if os.path.basename(proc.exe()) in exes:
+                        procs.append("%s (%s)" % (proc.exe(), proc.pid))
+                except:
+                    continue
+            except:
+                pass
+
+    return procs
+
+
+def showDetailPopup(msgTxt, parent):
+    procUserTxt = findPrismProcesses()
+    if procUserTxt:
+        msgTxt += "\n\nThe following Prism processes are already running:\n\n"
+        msgTxt += "\n".join(procUserTxt)
+
+    title = "Details"
+    icon = QMessageBox.Information
+    buttons = ["Stop processes", "Close"]
+    default = buttons[0]
+    escapeButton = "Close"
+
+    msg = QMessageBox(
+        icon,
+        title,
+        msgTxt,
+        parent=parent,
+    )
+
+    for button in buttons:
+        if button in ["Close", "Cancel", "Ignore"]:
+            role = QMessageBox.RejectRole
+        else:
+            role = QMessageBox.YesRole
+
+        b = msg.addButton(button, role)
+        if default == button:
+            msg.setDefaultButton(b)
+
+        if escapeButton == button:
+            msg.setEscapeButton(b)
+
+    msg.exec_()
+    result = msg.clickedButton().text()
+    if result == "Stop processes":
+        closePrismProcesses()
+        parent._result = "Stop running process"
+        parent.close()
+    elif result == "Close":
+        pass
+
+    return result
+
+
+def popupQuestion(text, buttons):
+    text = str(text)
+    title = "Prism"
+    icon = QMessageBox.Warning
+    default = buttons[0]
+    escapeButton = "Close"
+
+    msg = QMessageBox(
+        icon,
+        title,
+        text,
+    )
+    for button in buttons:
+        if button in ["Close", "Cancel", "Ignore"]:
+            role = QMessageBox.RejectRole
+        else:
+            role = QMessageBox.YesRole
+
+        b = msg.addButton(button, role)
+        if default == button:
+            msg.setDefaultButton(b)
+
+        if button == "Details...":
+            b.clicked.disconnect()
+            b.clicked.connect(lambda: showDetailPopup(text, msg))
+
+        if escapeButton == button:
+            msg.setEscapeButton(b)
+
+    msg.exec_()
+    result = msg.clickedButton().text()
+    if hasattr(msg, "_result"):
+        result = msg._result
+
+    return result
+
+
+def closePrismProcesses():
+    try:
+        import psutil
+    except Exception as e:
+        pass
+    else:
+        PROCNAMES = ["Prism.exe"]
+        for proc in psutil.process_iter():
+            if proc.name() in PROCNAMES:
+                p = psutil.Process(proc.pid)
+                if proc.pid == os.getpid():
+                    continue
+
+                try:
+                    if "SYSTEM" not in p.username():
+                        try:
+                            proc.kill()
+                        except Exception as e:
+                            logger.warning("error while killing process: %s" % str(e))
+                except Exception as e:
+                    logger.warning("failed to kill process: %s" % str(e))
+
+
+def launch():
     if isAlreadyRunning():
+        qApp = QApplication(sys.argv)
         senderThread = SenderThread()
         senderThread.start()
         idx = 0
@@ -427,8 +562,28 @@ if __name__ == "__main__":
             senderThread.shutDown()
         else:
             senderThread.quit()
-            QMessageBox.warning(None, "Prism", "Prism is already running.")
-        
+            qApp = QApplication.instance()
+            wIcon = QIcon(
+                os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "UserInterfacesPrism",
+                    "p_tray.png",
+                )
+            )
+            qApp.setWindowIcon(wIcon)
+
+            from UserInterfacesPrism.stylesheets import blue_moon
+            qApp.setStyleSheet(blue_moon.load_stylesheet(pyside=True))
+
+            result = popupQuestion("Prism is already running.", buttons=["Stop running process", "Details...", "Close"])
+            if result == "Stop running process":
+                closePrismProcesses()
+                return launch()
+            elif result == "Close":
+                pass
+            elif result == "Ignore":
+                return
+
         sys.exit()
     else:
         args = ["loadProject", "tray"]
@@ -438,5 +593,19 @@ if __name__ == "__main__":
                 args.append("noSplash")
 
         pc = PrismCore.create(prismArgs=args)
+        qApp = QApplication.instance()
+        qApp.setQuitOnLastWindowClosed(False)
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            QMessageBox.critical(
+                None,
+                "PrismTray",
+                "Could not launch PrismTray. Tray icons are not supported on this OS.",
+            )
+            sys.exit(1)
+
         pc.startTray()
         sys.exit(qApp.exec_())
+
+
+if __name__ == "__main__":
+    launch()

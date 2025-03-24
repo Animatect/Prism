@@ -162,8 +162,11 @@ class Page_Start(QWidget):
         self.chb_startmenu.setChecked(True)
         self.chb_integrations = QCheckBox("DCC integrations")
         self.chb_integrations.setChecked(True)
+        self.chb_uninstaller = QCheckBox("Create Uninstaller")
+        self.chb_uninstaller.setChecked(False)
         self.lo_options.addWidget(self.chb_startmenu)
         self.lo_options.addWidget(self.chb_integrations)
+        self.lo_options.addWidget(self.chb_uninstaller)
 
         self.w_footer = QWidget()
         self.lo_footer = QHBoxLayout()
@@ -202,6 +205,8 @@ class Page_Startmenu(QWidget):
         QApplication.processEvents()
         if self.parent.w_pageStart.chb_startmenu.isChecked():
             self.parent.core.setupStartMenu(quiet=True)
+
+        if self.parent.w_pageStart.chb_uninstaller.isChecked():
             self.l_header.setText("Creating uninstaller. Please wait...")
             QApplication.processEvents()
             self.parent.core.setupUninstaller(quiet=True)

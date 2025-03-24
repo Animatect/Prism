@@ -41,7 +41,7 @@ from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
-from PrismUtils import PrismWidgets
+from PrismUtils import PrismWidgets, ProjectWidgets
 from PrismUtils.Decorators import err_catcher
 from UserInterfaces import ProductBrowser_ui
 
@@ -81,32 +81,45 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
 
     @err_catcher(name=__name__)
     def entered(self, prevTab=None, navData=None):
+        if prevTab:
+            if hasattr(prevTab, "w_entities"):
+                navData = prevTab.w_entities.getCurrentData()
+            elif hasattr(prevTab, "getSelectedData"):
+                navData = prevTab.getSelectedData()
+
         if not self.initialized:
+            isScenefile = False
+            if not navData:
+                navPath = self.core.getCurrentFileName()
+                if self.importState:
+                    impPath = self.importState.getImportPath()
+                    if impPath and os.path.exists(os.path.dirname(impPath)):
+                        navData = self.getDataFromPath(impPath)
+
+                if not navData:
+                    isScenefile = True
+                    navData = self.getDataFromPath(navPath, scenefile=isScenefile)
+
             self.w_entities.getPage("Assets").blockSignals(True)
             self.w_entities.getPage("Shots").blockSignals(True)
+            self.w_entities.tb_entities.blockSignals(True)
             self.w_entities.blockSignals(True)
+            self.w_entities.navigate(navData)
             self.w_entities.refreshEntities(defaultSelection=False)
             self.w_entities.getPage("Assets").blockSignals(False)
             self.w_entities.getPage("Shots").blockSignals(False)
+            self.w_entities.tb_entities.blockSignals(False)
             self.w_entities.blockSignals(False)
             if navData:
-                self.navigate(navData)
-            else:
-                navPath = self.core.getCurrentFileName()
-                if self.importState:
-                    result = self.navigateToFile(self.importState.getImportPath())
-                    if result:
-                        navPath = None
-
-                self.navigateToFile(navPath, scenefile=True)
+                self.navigateToFile(data=navData, identifier=navData.get("product"), version=navData.get("version"), scenefile=isScenefile)
 
             self.initialized = True
 
         if prevTab:
             if hasattr(prevTab, "w_entities"):
-                self.w_entities.syncFromWidget(prevTab.w_entities)
+                self.w_entities.syncFromWidget(prevTab.w_entities, navData=navData)
             elif hasattr(prevTab, "getSelectedData"):
-                self.w_entities.navigate(prevTab.getSelectedData())
+                self.w_entities.navigate(navData)
 
     @err_catcher(name=__name__)
     def closeEvent(self, event=None):
@@ -117,7 +130,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         import EntityWidget
 
         self.w_entities = EntityWidget.EntityWidget(core=self.core, refresh=False, mode="products")
-        self.splitter.insertWidget(0, self.w_entities)
+        self.splitter1.insertWidget(0, self.w_entities)
 
         self.b_custom = QPushButton("Import custom files")
         self.w_entities.layout().addWidget(self.b_custom)
@@ -151,6 +164,10 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         if len(self.w_entities.getLocations()) > 1 or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
             self.versionLabels.insert(3, "Location")
 
+        if self.projectBrowser and self.projectBrowser.act_rememberWidgetSizes.isChecked():
+            if "productsSplitter1" in brsData:
+                self.splitter1.setSizes(brsData["productsSplitter1"])
+
         self.tw_versions.setAcceptDrops(True)
         self.tw_versions.dragEnterEvent = self.productDragEnterEvent
         self.tw_versions.dragMoveEvent = self.productDragMoveEvent
@@ -161,6 +178,10 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         self.setStyleSheet("QSplitter::handle{background-color: transparent}")
         self.updateSizeColumn()
         self.tw_versions.sortByColumn(0, Qt.DescendingOrder)
+
+    @err_catcher(name=__name__)
+    def saveSettings(self, data):
+        data["browser"]["productsSplitter1"] = self.splitter1.sizes()
 
     @err_catcher(name=__name__)
     def versionHeaderChanged(self):
@@ -267,12 +288,19 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
 
     @err_catcher(name=__name__)
     def ingestProductVersion(self, entity, files):
-        product = self.getCurrentProductName()
-        if not product:
+        if self.core.products.getLinkedToTasks():
+            product = self.getCurrentProduct() or {}
+            productName = product.get("product")
+            product.update(entity)
+            entity = product
+        else:
+            productName = self.getCurrentProductName()
+
+        if not productName:
             self.core.popup("No valid context is selected")
             return
 
-        self.core.products.ingestProductVersion(files, entity, product)
+        self.core.products.ingestProductVersion(files, entity, productName)
         self.updateVersions()
 
     @err_catcher(name=__name__)
@@ -497,7 +525,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             else:
                 data = item.data(0, Qt.UserRole)
                 if data:
-                    path = data["locations"][0]
+                    path = list(data["locations"].values())[0]
                 else:
                     entity = self.getCurrentEntity()
                     if not entity:
@@ -530,6 +558,10 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             rcmenu = QMenu(viewUi)
             row = self.tw_versions.rowAt(pos.y())
 
+            act_create = QAction("Create Version...", self)
+            act_create.triggered.connect(self.createVersionDlg)
+            rcmenu.addAction(act_create)
+
             if row == -1:
                 self.tw_versions.setCurrentIndex(
                     self.tw_versions.model().createIndex(-1, 0)
@@ -537,7 +569,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                 if self.getCurrentProduct() is None:
                     return
 
-                locs = self.getCurrentProduct()["locations"]
+                locs = list(self.getCurrentProduct()["locations"].values())
                 if locs:
                     path = locs[0]
                 else:
@@ -573,12 +605,14 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
 
                 if "Location" in self.versionLabels:
                     column = self.versionLabels.index("Location")
-                    location = self.tw_versions.item(row, column).text()
-                    if "local" in location and "global" not in location:
-                        glbAct = QAction("Move to global", viewUi)
-                        versionDir = os.path.dirname(os.path.dirname(path))
-                        glbAct.triggered.connect(lambda: self.moveToGlobal(versionDir))
-                        rcmenu.addAction(glbAct)
+                    locItem = self.tw_versions.item(row, column)
+                    if locItem:
+                        location = locItem.text()
+                        if "local" in location and "global" not in location:
+                            glbAct = QAction("Move to global", viewUi)
+                            versionDir = os.path.dirname(os.path.dirname(path))
+                            glbAct.triggered.connect(lambda: self.moveToGlobal(versionDir))
+                            rcmenu.addAction(glbAct)
 
                 infAct = QAction("Edit comment...", self)
                 infAct.triggered.connect(lambda: self.editComment(path))
@@ -643,15 +677,17 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             version = self.tw_versions.model().index(row, 0).data(Qt.UserRole)
             curLoc = self.core.paths.getLocationFromPath(path)
             locMenu = QMenu("Copy to", self)
-            rcmenu.addMenu(locMenu)
             locs = self.core.paths.getExportProductBasePaths()
             for loc in locs:
                 if loc == curLoc:
                     continue
 
                 copAct = QAction(loc, self)
-                copAct.triggered.connect(lambda x=None, l=loc: self.copyToLocation(version["path"], l))
+                copAct.triggered.connect(lambda x=None, lc=loc: self.copyToLocation(version["path"], lc))
                 locMenu.addAction(copAct)
+
+            if not locMenu.isEmpty():
+                rcmenu.addMenu(locMenu)
 
         self.core.callback(
             "productSelectorContextMenuRequested", args=[self, viewUi, pos, rcmenu]
@@ -718,8 +754,9 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         details["product"] = curProduct
         details["version"] = outputPathData["version"]
 
-        self.core.saveSceneInfo(nextPath + ".", details=details)
+        self.core.saveVersionInfo(os.path.dirname(nextPath), details=details)
         self.core.copyToClipboard(nextPath)
+        self.updateVersions(restoreSelection=True)
 
     @err_catcher(name=__name__)
     def copyToLocation(self, path, location):
@@ -745,28 +782,24 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
 
     @err_catcher(name=__name__)
     def createProductDlg(self):
-        self.newItem = PrismWidgets.CreateItem(
-            core=self.core, showType=False, mode="product"
-        )
-        self.newItem.setModal(True)
-        self.core.parentWindow(self.newItem)
-        self.newItem.e_item.setFocus()
-        self.newItem.setWindowTitle("Create Product")
-        self.newItem.l_item.setText("Productname:")
+        curEntity = self.getCurrentEntity()
+        self.newItem = ProjectWidgets.CreateProductDlg(self, entity=curEntity)
+        self.newItem.e_product.setFocus()
         self.newItem.accepted.connect(self.createProduct)
-
         self.core.callback(name="onCreateProductDlgOpen", args=[self, self.newItem])
-
         self.newItem.show()
 
     @err_catcher(name=__name__)
     def createProduct(self):
         self.activateWindow()
-        itemName = self.newItem.e_item.text()
-
+        itemName = self.newItem.e_product.text()
         curEntity = self.getCurrentEntity()
+        if self.core.products.getLinkedToTasks():
+            curEntity["department"] = self.newItem.e_department.text() or "unknown"
+            curEntity["task"] = self.newItem.e_task.text() or "unknown"
 
-        self.core.products.createProduct(entity=curEntity, product=itemName)
+        location = self.newItem.cb_location.currentText()
+        self.core.products.createProduct(entity=curEntity, product=itemName, location=location)
         selItems = self.tw_identifier.selectedItems()
         if len(selItems) == 1 and not selItems[0].data(0, Qt.UserRole):
             item = selItems[0]
@@ -783,6 +816,47 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         items = self.tw_identifier.findItems(itemName, Qt.MatchFlag(Qt.MatchExactly & Qt.MatchCaseSensitive ^ Qt.MatchRecursive))
         if items:
             self.tw_identifier.setCurrentItem(items[0])
+
+    @err_catcher(name=__name__)
+    def createVersionDlg(self):
+        context = self.getCurrentProduct()
+        version = self.core.products.getNextAvailableVersion(context, context["product"])
+        intVersion = self.core.products.getIntVersionFromVersionName(version)
+        self.newItem = ProjectWidgets.CreateProductVersionDlg(self, entity=context)
+        if intVersion is not None:
+            self.newItem.sp_version.setValue(intVersion)
+
+        location = self.core.products.getLocationFromPath(context["path"])
+        if location:
+            self.newItem.cb_location.setCurrentText(location)
+
+        self.newItem.sp_version.setFocus()
+        self.newItem.accepted.connect(self.createVersion)
+        self.core.callback(name="onCreateVersionDlgOpen", args=[self, self.newItem])
+        self.newItem.show()
+
+    @err_catcher(name=__name__)
+    def createVersion(self):
+        self.activateWindow()
+        versionName = self.core.versionFormat % self.newItem.sp_version.value()
+        curEntity = self.getCurrentEntity()
+        product = self.getCurrentProduct()
+        location = self.newItem.cb_location.currentText()
+        if self.core.products.getLinkedToTasks():
+            curEntity["department"] = product.get("department", "unknown")
+            curEntity["task"] = product.get("task", "unknown")
+
+        files = [f for f in self.newItem.l_filePath.text().replace("< Click or Drag & Drop files >", "").split("\n") if f]
+        self.core.products.ingestProductVersion(
+            files=files,
+            entity=curEntity,
+            product=product["product"],
+            version=versionName,
+            location=location,
+        )
+        self.updateVersions()
+        if versionName is not None:
+            self.navigateToVersion(versionName)
 
     @err_catcher(name=__name__)
     def moveToGlobal(self, localPath):
@@ -1011,15 +1085,54 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         identifiers = self.getIdentifiers()
         identifierNames = sorted(identifiers.keys(), key=lambda s: s.lower())
         groups, groupItems = self.createGroupItems(identifiers)
-        for tn in identifierNames:
-            item = QTreeWidgetItem([tn.replace("_ShotCam", "ShotCam")])
-            item.setData(0, Qt.UserRole, identifiers[tn])
-            if tn in groups:
-                parent = groupItems[groups[tn]]
-            else:
-                parent = self.tw_identifier.invisibleRootItem()
+        useTasks = self.core.products.getLinkedToTasks()
+        if useTasks:
+            items = {}
+            for tn in identifierNames:
+                item = QTreeWidgetItem([os.path.basename(tn).replace("_ShotCam", "ShotCam")])
+                item.setData(0, Qt.UserRole, identifiers[tn])
+                useDep = os.getenv("PRISM_USE_DEPARTMENTS_FOR_PRODUCTS", "1") == "1"
+                if useDep:
+                    dep = identifiers[tn].get("department") or "unknown"
+                    if dep not in items:
+                        item = QTreeWidgetItem([dep])
+                        items[dep] = {"item": item, "tasks": {}}
+                        self.tw_identifier.invisibleRootItem().addChild(item)
 
-            parent.addChild(item)
+                    task = identifiers[tn].get("task") or "unknown"
+                    if task not in items[dep]["tasks"]:
+                        item = QTreeWidgetItem([task])
+                        items[dep]["tasks"][task] = {"item": item}
+                        items[dep]["item"].addChild(item)
+
+                    if tn in groups:
+                        parent = groupItems[groups[tn]]
+                    else:
+                        parent = items[dep]["tasks"][task]["item"]
+                else:
+                    task = identifiers[tn].get("task") or "unknown"
+                    if task not in items:
+                        item = QTreeWidgetItem([task])
+                        items[task] = {"item": item}
+                        self.tw_identifier.invisibleRootItem().addChild(item)
+
+                    if tn in groups:
+                        parent = groupItems[groups[tn]]
+                    else:
+                        parent = items[task]["item"]
+
+                parent.addChild(item)
+
+        else:
+            for tn in identifierNames:
+                item = QTreeWidgetItem([tn.replace("_ShotCam", "ShotCam")])
+                item.setData(0, Qt.UserRole, identifiers[tn])
+                if tn in groups:
+                    parent = groupItems[groups[tn]]
+                else:
+                    parent = self.tw_identifier.invisibleRootItem()
+
+                parent.addChild(item)
 
         if self.tw_identifier.topLevelItemCount() > 0:
             selectFirst = True
@@ -1106,36 +1219,32 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             versions = self.core.products.getVersionsFromContext(identifierData, locations=[location])
             for version in versions:
                 if version["version"] == "master":
-                    if len(self.w_entities.getLocations()) > 1 or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
-                        location = [self.core.products.getLocationFromFilepath(path) for path in version["paths"]]
-                    else:
-                        location = None
-
-                    if location:
-                        filepath = self.core.products.getPreferredFileFromVersion(
-                            version, location=location[0]
-                        )
-                    else:
-                        filepath = self.core.products.getPreferredFileFromVersion(
-                            version
-                        )
-
+                    location = list(version.get("locations", [None]))[0]
+                    filepath = self.core.products.getPreferredFileFromVersion(
+                        version, location=location if location else None
+                    )
                     if not filepath:
                         continue
-                    
-                    cfgData = self.core.paths.getCachePathData(filepath, addPathData=False)
-                    cfgData.update(version)
-                    comment = cfgData.get("comment", "")
-                    user = cfgData.get("user", "")
+
+                    versionNameData = self.core.products.getDataFromVersionContext(
+                        version
+                    ).copy()
+                    versionNameData.update(version)
+                    comment = versionNameData.get("comment", "")
+                    user = versionNameData.get("user", "")
                     versionName = self.core.products.getMasterVersionLabel(filepath)
                     self.addVersionToTable(
-                        filepath, versionName, comment, user, location=location, data=cfgData
+                        filepath, versionName, comment, user, data=versionNameData
                     )
                 else:
                     filepath = self.core.products.getPreferredFileFromVersion(version)
+                    if not filepath:
+                        continue
+
                     versionNameData = self.core.products.getDataFromVersionContext(
                         version
-                    )
+                    ).copy()
+                    versionNameData.update(version)
                     versionName = versionNameData.get("version")
                     if not versionName:
                         versionName = version.get("version")
@@ -1145,13 +1254,9 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
 
                     comment = versionNameData.get("comment")
                     user = versionNameData.get("user")
-                    if len(self.w_entities.getLocations()) > 1 or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
-                        location = [self.core.products.getLocationFromFilepath(path) for path in version["paths"]]
-                    else:
-                        location = None
 
                     self.addVersionToTable(
-                        filepath, versionName, comment, user, location=location, data=versionNameData
+                        filepath, versionName, comment, user, data=versionNameData
                     )
 
         self.tw_versions.resizeColumnsToContents()
@@ -1180,7 +1285,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                 self.versionsUpdated.emit()
 
     @err_catcher(name=__name__)
-    def addVersionToTable(self, filepath, versionName, comment, user, location=None, data=None):
+    def addVersionToTable(self, filepath, versionName, comment, user, data=None):
         dateStamp = data.get("date", "") if data else ""
         if filepath:
             _, depExt = self.core.paths.splitext(filepath)
@@ -1197,7 +1302,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         else:
             item = VersionItem(versionName)
 
-        item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+        item.setTextAlignment(Qt.AlignCenter)
         item.setData(Qt.UserRole, data)
         self.tw_versions.setItem(row, self.versionLabels.index("Version"), item)
 
@@ -1205,28 +1310,24 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             comment = ""
 
         item = QTableWidgetItem(comment)
-        item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+        item.setTextAlignment(Qt.AlignCenter)
         self.tw_versions.setItem(row, self.versionLabels.index("Comment"), item)
 
         item = QTableWidgetItem(depExt)
-        item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+        item.setTextAlignment(Qt.AlignCenter)
         self.tw_versions.setItem(row, self.versionLabels.index("Type"), item)
-
-        if (location and len(self.w_entities.getLocations()) > 1) or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
+        if (data.get("locations", {}) and len(self.w_entities.getLocations()) > 1) or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
             self.locationLabels = {}
             locations = []
-            if location:
-                if self.core.isStr(location):
-                    locations.append(location)
-                else:
-                    locations += location
-
             if self.projectBrowser and len(self.projectBrowser.locations) > 1:
                 locations = []
                 w_location = QWidget()
                 lo_location = QHBoxLayout(w_location)
                 lo_location.addStretch()
                 for location in self.projectBrowser.locations:
+                    if not filepath:
+                        continue
+
                     if location.get("name") == "global":
                         globalPath = self.core.convertPath(filepath, "global")
                         if not os.path.exists(globalPath):
@@ -1237,7 +1338,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                         if not os.path.exists(localPath):
                             continue
 
-                    elif location.get("name") not in data.get("locations", []):
+                    elif location.get("name") not in data.get("locations", {}):
                         continue
 
                     l_loc = QLabel()
@@ -1254,18 +1355,26 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                     
                     lo_location.addWidget(l_loc)
 
+                for location in data.get("locations", {}):
+                    if location not in [loc["name"] for loc in self.projectBrowser.locations]:
+                        l_loc = QLabel()
+                        l_loc.setToolTip("Version exists in %s" % location)
+                        self.locationLabels[location] = l_loc
+                        l_loc.setText(location)
+                        lo_location.addWidget(l_loc)
+
                 lo_location.addStretch()
                 self.tw_versions.setCellWidget(row, self.versionLabels.index("Location"), w_location)
                 item = QTableWidgetItem()
             else:
-                item = QTableWidgetItem(", ".join(locations))
-                item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+                item = QTableWidgetItem(", ".join(data.get("locations", {})))
+                item.setTextAlignment(Qt.AlignCenter)
 
-            item.setData(Qt.UserRole, locations)
+            item.setData(Qt.UserRole, data.get("locations", {}))
             self.tw_versions.setItem(row, self.versionLabels.index("Location"), item)
 
         item = QTableWidgetItem(user)
-        item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+        item.setTextAlignment(Qt.AlignCenter)
         self.tw_versions.setItem(row, self.versionLabels.index("User"), item)
 
         if self.core.getConfig("globals", "showFileSizes", config="user"):
@@ -1279,11 +1388,11 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             sizeStr = "%.2f mb" % size
 
             item = QTableWidgetItem(sizeStr)
-            item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+            item.setTextAlignment(Qt.AlignCenter)
             self.tw_versions.setItem(row, self.versionLabels.index("Size"), item)
 
         item = QTableWidgetItem()
-        item.setTextAlignment(Qt.Alignment(Qt.AlignCenter))
+        item.setTextAlignment(Qt.AlignCenter)
         
         item.setData(Qt.DisplayRole, dateStamp)
         self.tw_versions.setItem(row, self.versionLabels.index("Date"), item)
@@ -1292,7 +1401,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         item = QTableWidgetItem(impPath)
         self.tw_versions.setItem(row, self.versionLabels.index("Path"), item)
 
-        self.core.callback(name="productVersionAdded", args=[self, row, filepath, versionName, comment, user, location])
+        self.core.callback(name="productVersionAdded", args=[self, row, filepath, versionName, comment, user, data.get("locations", {})])
 
     @err_catcher(name=__name__)
     def getCurSelection(self):
@@ -1333,26 +1442,34 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         self.navigateToFile(data=data, identifier=data.get("product"), version=data.get("version"))
 
     @err_catcher(name=__name__)
+    def getDataFromPath(self, path, scenefile=False):
+        if os.path.exists(path):
+            fileName = path
+        else:
+            fileName = os.path.dirname(path)
+            if not os.path.exists(fileName):
+                return False
+
+        fileName = os.path.normpath(fileName)
+        if scenefile:
+            data = self.core.getScenefileData(fileName)
+        else:
+            data = self.core.paths.getCachePathData(fileName)
+
+        return data
+
+    @err_catcher(name=__name__)
     def navigateToFile(self, fileName=None, identifier=None, version=None, scenefile=False, data=None):
         if not data:
             if not fileName:
                 return False
 
-            if not os.path.exists(fileName):
-                fileName = os.path.dirname(fileName)
-                if not os.path.exists(fileName):
-                    return False
-
-            fileName = os.path.normpath(fileName)
-            if scenefile:
-                data = self.core.getScenefileData(fileName)
-            else:
-                data = self.core.paths.getCachePathData(fileName)
+            data = self.getDataFromPath(fileName) or {}
 
         if not identifier:
             identifier = data.get("product") or ""
 
-        if not version:
+        if not version and not scenefile:
             version = data.get("version") or ""
 
         versionName = version

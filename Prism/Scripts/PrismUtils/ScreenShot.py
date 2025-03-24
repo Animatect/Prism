@@ -117,23 +117,10 @@ class ScreenShot(QDialog):
             else:
                 screen = QPixmap
 
-            desktop = QApplication.desktop()
-            winID = desktop.winId()
-            if sys.version[0] == "2":
-                try:
-                    winID = long(winID)
-                except:
-                    pass
-
             pos = self.mapToGlobal(rect.topLeft())
-            try:
-                self.imgmap = screen.grabWindow(
-                    winID, pos.x(), pos.y(), rect.width(), rect.height()
-                )
-            except:
-                self.imgmap = screen.grabWindow(
-                    int(winID), pos.x(), pos.y(), rect.width(), rect.height()
-                )
+            self.imgmap = screen.grabWindow(
+                0, pos.x(), pos.y(), rect.width(), rect.height()
+            )
             self.close()
 
         QWidget.mouseReleaseEvent(self, event)

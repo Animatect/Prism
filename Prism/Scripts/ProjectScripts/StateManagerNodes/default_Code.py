@@ -34,6 +34,7 @@
 import os
 import sys
 import logging
+import traceback
 
 from qtpy.QtCore import *
 from qtpy.QtGui import *
@@ -72,14 +73,10 @@ class CodeClass(object):
         if "code" in data:
             self.te_code.setPlainText(data["code"])
         if "stateenabled" in data and self.listType == "Export":
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         self.core.callback("onStateSettingsLoaded", self, data)
 
@@ -142,9 +139,13 @@ class CodeClass(object):
             if result["val"] is not None:
                 msg += "\n\n%s" % result["val"]
 
-            self.core.popup(msg, severity="info")
+            if result.get("showPopup", True):
+                self.core.popup(msg, severity="info")
         else:
             msg = "Failed to execute the code:\n\n%s" % result["error"]
+            if result["val"] is not None:
+                msg += "\n\n%s" % result["val"]
+
             self.core.popup(msg)
 
     @err_catcher(name=__name__)
@@ -154,19 +155,21 @@ class CodeClass(object):
         else:
             from cStringIO import StringIO
 
+        showPopup = True
         code = self.getCode()
         old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
+        _globals = {"pcore": self.core, "state": self}
+        _locals = locals()
 
         try:
-            exec(code, {"pcore": self.core, "state": self})
+            exec(code, _globals, _locals)
         except Exception as e:
             sys.stdout = old_stdout
-            return {"result": "error", "error": e, "val": redirected_output.getvalue()}
+            return {"result": "error", "error": traceback.format_exc(), "val": redirected_output.getvalue()}
 
         sys.stdout = old_stdout
-
-        return {"result": "success", "val": redirected_output.getvalue()}
+        return {"result": "success", "val": redirected_output.getvalue(), "showPopup": _locals["showPopup"]}
 
     @err_catcher(name=__name__)
     def preExecuteState(self):
@@ -195,7 +198,7 @@ class CodeClass(object):
             {
                 "statename": self.e_name.text(),
                 "code": self.te_code.toPlainText(),
-                "stateenabled": str(self.state.checkState(0)),
+                "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
             }
         )
         return stateProps

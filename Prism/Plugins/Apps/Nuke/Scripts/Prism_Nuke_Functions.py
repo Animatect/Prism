@@ -51,10 +51,21 @@ from PySide2.QtCore import *
 from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 
+
 try:
     from PrismUtils.Decorators import err_catcher as err_catcher
 except:
-    err_catcher = lambda name: lambda func, *args, **kwargs: func(*args, **kwargs)
+    # err_catcher = lambda name: lambda func, *args, **kwargs: func(*args, **kwargs)
+    from functools import wraps
+    def err_catcher(name):
+        return lambda x, y=name, z=False: err_handler(x, name=y, plugin=z)
+
+    def err_handler(func, name="", plugin=False):
+        @wraps(func)
+        def func_wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return func_wrapper
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +86,12 @@ class Prism_Nuke_Functions(object):
         )
         self.core.registerCallback(
             "onPreMediaPlayerDragged", self.onPreMediaPlayerDragged, plugin=self.plugin
+        )
+        self.core.registerCallback(
+            "onStateManagerOpen", self.onStateManagerOpen, plugin=self.plugin
+        )
+        self.core.registerCallback(
+            "productSelectorContextMenuRequested", self.productSelectorContextMenuRequested, plugin=self.plugin
         )
 
     @err_catcher(name=__name__)
@@ -117,12 +134,13 @@ class Prism_Nuke_Functions(object):
     def addMenus(self):
         nuke.menu("Nuke").addCommand("Prism/Save", self.saveScene, "Ctrl+s")
         nuke.menu("Nuke").addCommand("Prism/Save Version", self.core.saveScene, "Alt+Shift+s")
-        nuke.menu("Nuke").addCommand("Prism/Save Comment", self.core.saveWithComment, "Ctrl+Shift+S")
-        nuke.menu("Nuke").addCommand("Prism/Project Browser", self.core.projectBrowser)
-        nuke.menu("Nuke").addCommand("Prism/Settings", self.core.prismSettings)
+        nuke.menu("Nuke").addCommand("Prism/Save Comment...", self.core.saveWithComment, "Ctrl+Shift+S")
+        nuke.menu("Nuke").addCommand("Prism/Project Browser...", self.core.projectBrowser)
+        nuke.menu("Nuke").addCommand("Prism/Settings...", self.core.prismSettings)
         nuke.menu("Nuke").addCommand(
             "Prism/Update selected read nodes", self.updateNukeNodes
         )
+        nuke.menu("Nuke").addCommand("Prism/Export Nodes...", self.onExportTriggered)
 
         toolbar = nuke.toolbar("Nodes")
         iconPath = os.path.join(
@@ -173,7 +191,7 @@ class Prism_Nuke_Functions(object):
     @err_catcher(name=__name__)
     def expandEnvVarsInFilepath(self, path):
         if not self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user"):
-            return
+            return path
 
         expanded_path = os.path.expandvars(path)
         return expanded_path
@@ -252,8 +270,20 @@ class Prism_Nuke_Functions(object):
         return resFormat
 
     @err_catcher(name=__name__)
-    def setResolution(self, width=None, height=None):
-        return nuke.knob("root.format", "%s %s" % (width, height))
+    def setResolution(self, width=None, height=None, pixelAspect=None):
+        if pixelAspect:
+            return nuke.knob("root.format", "%s %s 0 0 %s %s %s" % (width, height, width, height, pixelAspect))
+        else:
+            return nuke.knob("root.format", "%s %s" % (width, height))
+
+    @err_catcher(name=__name__)
+    def getPixelAspectRatio(self):
+        return nuke.root().pixelAspect()
+
+    @err_catcher(name=__name__)
+    def setPixelAspectRatio(self, pixelAspect):
+        res = self.getResolution()
+        self.setResolution(res[0], res[1], pixelAspect)
 
     @err_catcher(name=__name__)
     def updateNukeNodes(self):
@@ -264,9 +294,13 @@ class Prism_Nuke_Functions(object):
                 continue
 
             curPath = i.knob("file").value()
+            curPath = os.path.expandvars(curPath)
             version = self.core.mediaProducts.getLatestVersionFromFilepath(curPath)
             if version and version["path"] not in curPath:
                 filepattern = self.core.mediaProducts.getFilePatternFromVersion(version)
+                if self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user"):
+                    filepattern = os.path.normpath(filepattern).replace(os.path.normpath(self.core.projectPath), "%PRISM_JOB%")
+
                 filepattern = filepattern.replace("\\", "/")
                 i.knob("file").setValue(filepattern)
                 updatedNodes.append(i)
@@ -347,6 +381,13 @@ class Prism_Nuke_Functions(object):
     @err_catcher(name=__name__)
     def getIdentifierFromNode(self, node):
         return node.knob("identifier").evaluate()
+
+    @err_catcher(name=__name__)
+    def sm_render_fixOutputPath(self, origin, outputName, singleFrame=False, state=None):
+        if self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user"):
+            outputName = os.path.normpath(outputName).replace(os.path.normpath(self.core.projectPath), "%PRISM_JOB%")
+
+        return outputName
 
     @err_catcher(name=__name__)
     def getOutputPath(self, node, group, render=False, updateValues=True):
@@ -518,22 +559,23 @@ class Prism_Nuke_Functions(object):
         return True
 
     @err_catcher(name=__name__)
-    def importImages(self, origin):
-        if origin.origin.getCurrentAOV():
-            fString = "Please select an import option:"
-            buttons = ["Current AOV", "All AOVs", "Layout all AOVs"]
-            result = self.core.popupQuestion(fString, buttons=buttons, icon=QMessageBox.NoIcon)
-        else:
-            result = "Current AOV"
+    def importImages(self, filepath=None, mediaBrowser=None, parent=None):
+        if mediaBrowser:
+            if mediaBrowser.origin.getCurrentAOV():
+                fString = "Please select an import option:"
+                buttons = ["Current AOV", "All AOVs", "Layout all AOVs"]
+                result = self.core.popupQuestion(fString, buttons=buttons, icon=QMessageBox.NoIcon)
+            else:
+                result = "Current AOV"
 
-        if result == "Current AOV":
-            self.nukeImportSource(origin)
-        elif result == "All AOVs":
-            self.nukeImportPasses(origin)
-        elif result == "Layout all AOVs":
-            self.nukeLayout(origin)
-        else:
-            return
+            if result == "Current AOV":
+                self.nukeImportSource(mediaBrowser)
+            elif result == "All AOVs":
+                self.nukeImportPasses(mediaBrowser)
+            elif result == "Layout all AOVs":
+                self.nukeLayout(mediaBrowser)
+            else:
+                return
 
     @err_catcher(name=__name__)
     def nukeImportSource(self, origin):
@@ -543,6 +585,8 @@ class Prism_Nuke_Functions(object):
             filePath = i[0]
             firstFrame = i[1]
             lastFrame = i[2]
+            if self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user"):
+                filePath = os.path.normpath(filePath).replace(os.path.normpath(self.core.projectPath), "%PRISM_JOB%").replace("\\", "/")
 
             node = nuke.createNode(
                 "Read",
@@ -562,6 +606,8 @@ class Prism_Nuke_Functions(object):
             filePath = i[0]
             firstFrame = i[1]
             lastFrame = i[2]
+            if self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user"):
+                filePath = os.path.normpath(filePath).replace(os.path.normpath(self.core.projectPath), "%PRISM_JOB%").replace("\\", "/")
 
             node = nuke.createNode(
                 "Read",
@@ -1109,6 +1155,8 @@ class Prism_Nuke_Functions(object):
 
         cmd = "try:\n\tpcore.getPlugin(\"Nuke\").updateNodeUI(\"writePrism\", nuke.toNode(nuke.thisNode().fullName().rsplit(\".\", 1)[0]))\nexcept:\n\tpass"
         nuke.thisNode().node("WritePrismBase").knob("knobChanged").setValue(cmd)
+        kwargs = {"origin": self, "node": nuke.thisNode()}
+        self.core.callback("onWriteGizmoCreated", **kwargs)
 
     @err_catcher(name=__name__)
     def updateNodeUI(self, nodeType, node):
@@ -1143,7 +1191,16 @@ class Prism_Nuke_Functions(object):
             "PRISM_NUKE_TERMINAL_FILES",
             os.path.abspath(__file__)
         )
-
+        self.core.getPlugin("Deadline").addEnvironmentItem(
+            dlParams["jobInfos"],
+            "PRISM_NUKE_USE_RELATIVE_PATHS",
+            self.core.getConfig("nuke", "useRelativePaths", dft=False, config="user")
+        )
+        self.core.getPlugin("Deadline").addEnvironmentItem(
+            dlParams["jobInfos"],
+            "PRISM_JOB",
+            os.getenv("PRISM_JOB", "")
+        )
         dlParams["pluginInfos"]["Version"] = self.getAppVersion(origin).split("v")[0]
         dlParams["pluginInfos"]["OutputFilePath"] = os.path.split(
             dlParams["jobInfos"]["OutputFilename0"]
@@ -1182,6 +1239,7 @@ class Prism_Nuke_Functions(object):
 
         state.ui.setFormat(fmt)
         state.ui.node = node
+        state.ui.group = group
         self.submitter = Farm_Submitter(self, state)
         self.submitter.show()
 
@@ -1190,7 +1248,8 @@ class Prism_Nuke_Functions(object):
         path = group.knob("prevFileName").value()
         if path == "None":
             return
-        
+
+        path = self.expandEnvVarsInFilepath(path)
         menu = QMenu()
 
         act_play = QAction("Play")
@@ -1267,6 +1326,127 @@ class Prism_Nuke_Functions(object):
 
         return pm
 
+    @err_catcher(name=__name__)
+    def onExportTriggered(self, selectedPaths=None):
+        sm = self.core.getStateManager()
+        if not sm:
+            return
+
+        if not self.core.fileInPipeline():
+            self.core.showFileNotInProjectWarning(title="Warning")
+            return False
+
+        for state in sm.states:
+            if state.ui.className == "NukeExport":
+                break
+        else:
+            state = sm.createState("NukeExport")
+            if not state:
+                msg = "Failed to create export state. Please contact the support."
+                self.core.popup(msg)
+                return
+
+        if hasattr(self, "dlg_export"):
+            self.dlg_export.close()
+
+        self.dlg_export = ExporterDlg(self, state)
+        state.ui.setTaskname("nuke")
+        self.dlg_export.show()
+
+    @err_catcher(name=__name__)
+    def onStateManagerOpen(self, origin):
+        import default_Export
+        import default_Export_ui
+
+        class NukeExportClass(QWidget, default_Export_ui.Ui_wg_Export, NukeExport, default_Export.ExportClass):
+            def __init__(self):
+                QWidget.__init__(self)
+                self.setupUi(self)
+
+        origin.loadState(NukeExportClass)
+
+    @err_catcher(name=__name__)
+    def sm_export_addObjects(self, origin, objects=None):
+        pass
+
+    @err_catcher(name=__name__)
+    def sm_export_preExecute(self, origin, startFrame, endFrame):
+        warnings = []
+
+        if not nuke.selectedNodes():
+            warnings.append(
+                [
+                    "No nodes selected.",
+                    "Select nodes to export.",
+                    3,
+                ]
+            )
+
+        return warnings
+
+    @err_catcher(name=__name__)
+    def sm_export_exportAppObjects(
+        self,
+        origin,
+        startFrame,
+        endFrame,
+        outputName,
+    ):
+        nuke.nodeCopy(outputName)
+        return outputName
+
+    @err_catcher(name=__name__)
+    def sm_import_importToApp(self, origin, doImport, update, impFileName):
+        fileName = os.path.splitext(os.path.basename(impFileName))
+        result = False
+
+        ext = fileName[1].lower()
+        if ext in self.plugin.sceneFormats:
+            result = nuke.nodePaste(impFileName)
+        elif ext in [".obj", ".fbx", ".abc"]:
+            path = impFileName.replace("\\", "/")
+            node_read = nuke.nodes.ReadGeo2(file=path)
+            node_scene = nuke.nodes.Scene(xpos=node_read.xpos() + 10, ypos=node_read.ypos()+200)
+            node_render = nuke.nodes.ScanlineRender(xpos=node_read.xpos(), ypos=node_read.ypos()+400)
+            node_render.connectInput(1, node_scene)
+            node_scene.connectInput(0, node_read)
+            result = [node_read]
+        else:
+            self.core.popup("Format is not supported.")
+            return {"result": False, "doImport": doImport}
+
+        return {"result": result, "doImport": doImport}
+
+    @err_catcher(name=__name__)
+    def importCamera(self, data, filepath):
+        path = filepath.replace("\\", "/")
+        node_read = nuke.nodes.Camera3(read_from_file_link=True, file_link=path)
+        node_scene = nuke.nodes.Scene(xpos=node_read.xpos()+300, ypos=node_read.ypos())
+        node_render = nuke.nodes.ScanlineRender(xpos=node_scene.xpos()-10, ypos=node_read.ypos()+200)
+        node_render.connectInput(0, node_read)
+        node_render.connectInput(1, node_scene)
+        node_scene.connectInput(0, node_read)
+
+    @err_catcher(name=__name__)
+    def productSelectorContextMenuRequested(self, origin, widget, pos, menu):
+        if widget == origin.tw_versions:
+            row = widget.rowAt(pos.y())
+            if row != -1:
+                pathC = widget.model().columnCount() - 1
+                path = widget.model().index(row, pathC).data()
+                ext = os.path.splitext(path)[1]
+                if ext in [".fbx", ".abc"]:
+                    item = origin.tw_identifier.currentItem()
+                    data = item.data(0, Qt.UserRole)
+                    action = QAction("Import Camera", origin)
+                    action.triggered.connect(lambda: self.importCamera(data, filepath=path))
+                    for idx, act in enumerate(menu.actions()):
+                        if act.text() == "Import":
+                            menu.insertAction(menu.actions()[idx+1], action)
+                            break
+                    else:
+                        menu.insertAction(0, action)
+
 
 if nuke.env.get("gui") and "fnFlipbookRenderer" in globals():
     class PrismRenderedFlipbook(fnFlipbookRenderer.SynchronousRenderedFlipbook):
@@ -1325,7 +1505,6 @@ class Farm_Submitter(QDialog):
         self.setLayout(self.lo_main)
         self.lo_main.addWidget(self.state.ui)
         self.state.ui.f_name.setVisible(False)
-        self.state.ui.w_master.setVisible(False)
         self.state.ui.w_format.setVisible(False)
         self.state.ui.f_taskname.setVisible(False)
         self.state.ui.f_resolution.setVisible(False)
@@ -1350,6 +1529,8 @@ class Farm_Submitter(QDialog):
         self.state.ui.gb_submit.setChecked(True)
 
         sm = self.core.getStateManager()
+        comment = self.state.ui.group.knob("comment").value()
+        sm.e_comment.setText(comment)
         result = sm.publish(successPopup=False, executeState=True, states=[self.state])
         sm.deleteState(self.state)
         if result:
@@ -1359,9 +1540,107 @@ class Farm_Submitter(QDialog):
         self.close()
 
 
+class NukeExport(object):
+    className = "NukeExport"
+
+    def setup(self, state, core, stateManager, node=None, stateData=None):
+        super(NukeExport, self).setup(state, core, stateManager, node, stateData)
+        self.w_name.setVisible(False)
+        self.w_range.setVisible(False)
+        self.f_frameRange_2.setVisible(False)
+        self.w_wholeScene.setVisible(False)
+        self.chb_wholeScene.setChecked(True)
+        self.gb_objects.setVisible(False)
+        self.w_additionalOptions.setVisible(False)
+        self.w_outType.setVisible(False)
+        self.gb_previous.setVisible(False)
+        self.cb_context.setVisible(False)
+
+
+class ExporterDlg(QDialog):
+    def __init__(self, origin, state):
+        super(ExporterDlg, self).__init__()
+        self.origin = origin
+        self.plugin = self.origin.plugin
+        self.core = self.plugin.core
+        self.core.parentWindow(self)
+        self.state = state
+        self.showSm = False
+        if self.core.sm.isVisible():
+            self.core.sm.setHidden(True)
+            self.showSm = True
+
+        self.setupUi()
+
+    @err_catcher(name=__name__)
+    def sizeHint(self):
+        hint = super(ExporterDlg, self).sizeHint()
+        hint += QSize(100, 0)
+        return hint
+
+    @err_catcher(name=__name__)
+    def setupUi(self):
+        self.setWindowTitle("Prism - Export Selected Nodes")
+        self.lo_main = QVBoxLayout()
+        self.setLayout(self.lo_main)
+        self.lo_main.addWidget(self.state.ui)
+
+        self.b_submit = QPushButton("Export")
+        self.lo_main.addWidget(self.b_submit)
+        self.b_submit.clicked.connect(self.submit)
+
+    @err_catcher(name=__name__)
+    def closeEvent(self, event):
+        curItem = self.core.sm.getCurrentItem(self.core.sm.activeList)
+        if self.state and curItem and id(self.state) == id(curItem):
+            self.core.sm.showState()
+
+        if self.showSm:
+            self.core.sm.setHidden(False)
+
+        event.accept()
+
+    @err_catcher(name=__name__)
+    def submit(self):
+        self.hide()
+
+        sanityChecks = True
+        version = None
+        saveScene = False
+        incrementScene = False
+
+        sm = self.core.getStateManager()
+        result = sm.publish(
+            successPopup=False,
+            executeState=True,
+            states=[self.state],
+            useVersion=version,
+            saveScene=saveScene,
+            incrementScene=incrementScene,
+            sanityChecks=sanityChecks,
+            versionWarning=False,
+        )
+        if result:
+            msg = "Exported nodes successfully."
+            result = self.core.popupQuestion(msg, buttons=["Open in Product Browser", "Open in Explorer", "Close"], icon=QMessageBox.Information)
+            path = self.state.ui.l_pathLast.text()
+            if result == "Open in Product Browser":
+                self.core.projectBrowser()
+                self.core.pb.showTab("Products")
+                data = self.core.paths.getCachePathData(path)
+                self.core.pb.productBrowser.navigateToProduct(data["product"], entity=data)
+            elif result == "Open in Explorer":
+                self.core.openFolder(path)
+
+            self.close()
+        else:
+            self.show()
+
+
 class Prism_NoQt(object):
     def __init__(self):
         self.addPluginPaths()
+        nuke.addFilenameFilter(self.expandEnvVarsInFilepath)
 
     def addPluginPaths(self):
         gdir = os.path.join(
@@ -1369,6 +1648,14 @@ class Prism_NoQt(object):
         )
         gdir = gdir.replace("\\", "/")
         nuke.pluginAddPath(gdir)
+
+    @err_catcher(name=__name__)
+    def expandEnvVarsInFilepath(self, path):
+        if os.getenv("PRISM_NUKE_USE_RELATIVE_PATHS", "1") == "0":
+            return path
+
+        expanded_path = os.path.expandvars(path)
+        return expanded_path
 
 
 class VersionDlg(QDialog):

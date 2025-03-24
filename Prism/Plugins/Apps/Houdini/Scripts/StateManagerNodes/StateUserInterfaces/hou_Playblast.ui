@@ -189,12 +189,6 @@
          </item>
          <item row="1" column="6">
           <widget class="QSpinBox" name="sp_rangeEnd">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>
@@ -205,12 +199,6 @@
          </item>
          <item row="0" column="6">
           <widget class="QSpinBox" name="sp_rangeStart">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>

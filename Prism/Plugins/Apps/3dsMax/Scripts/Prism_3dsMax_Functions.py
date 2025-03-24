@@ -885,7 +885,7 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
         )
 
     @err_catcher(name=__name__)
-    def sm_render_getAovNames(self):
+    def sm_render_getAovNames(self, rsFilter=False):
         aovs = []
         elementMgr = rt.maxOps.GetCurRenderElementMgr()
         if not elementMgr.GetElementsActive():
@@ -893,7 +893,34 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
 
         for idx in range(elementMgr.NumRenderElements()):
             element = elementMgr.GetRenderElement(idx)
-            aovs.append(element.elementName)
+            if rsFilter:
+                if str(element) in ["ReferenceTarget:RsCryptomatte", "ReferenceTarget:RsBeauty"]:
+                    continue
+
+            if element.enabled:
+                aovs.append(element.elementName)
+
+        return aovs
+
+    @err_catcher(name=__name__)
+    def sm_render_getAovNamesRedshiftLightGroups(self):
+        aovs = []
+        elementMgr = rt.maxOps.GetCurRenderElementMgr()
+        if not elementMgr.GetElementsActive():
+            return aovs
+
+        availableLightgroups = list(set([light.aovLightGroup for light in list(rt.lights) if hasattr(light, "aovLightGroup")]))
+        for idx in range(elementMgr.NumRenderElements()):
+            element = elementMgr.GetRenderElement(idx)
+            if element.enabled or str(element) in ["ReferenceTarget:RsCryptomatte"]:
+                lightgroups = []
+                if hasattr(element, "allLightGroups"):
+                    if element.allLightGroups:
+                        lightgroups = availableLightgroups
+                    else:
+                        lightgroups = list(element.lightGroupList)
+
+                aovs.append({"name": element.elementName, "lightgroups": lightgroups, "aovType": str(element)})
 
         return aovs
 
@@ -928,6 +955,12 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
     def sm_render_preExecute(self, origin):
         warnings = []
 
+        if getattr(origin, "chb_tileJob", None) and origin.chb_tileJob.isChecked():
+            rangeType = origin.cb_rangeType.currentText()
+            startFrame, endFrame = origin.getFrameRange(rangeType)
+            if startFrame != endFrame and endFrame is not None:
+                warnings.append(["Tile rendering is only supported for single frames.", "", 2])
+
         if self.sm_render_isVray(origin):
             if rt.execute( "renderers.current.output_on"):
                 warnings.append(["VrayFrameBuffer is activated.", "", 2])
@@ -942,12 +975,17 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
 
     @err_catcher(name=__name__)
     def sm_render_preSubmit(self, origin, rSettings):
+        isRs = self.getCurrentRenderer(origin) == "Redshift_Renderer"
+        if isRs and "Beauty" in self.sm_render_getAovNames():
+            rSettings["outputName"] = rSettings["outputName"].replace("beauty", "Beauty")
+
         if origin.cb_rangeType.currentText() != "Single Frame":
             base, ext = os.path.splitext(rSettings["outputName"])
             if not base.endswith("_"):
                 rsOutput = base + "_" + ext
                 rSettings["outputName"] = rsOutput
 
+        rt.renderSceneDialog.close()
         outputName = rSettings["outputName"]
         if not origin.gb_submit.isHidden() and origin.gb_submit.isChecked():
             if hasattr(origin, "chb_redshift") and origin.chb_redshift.isChecked() and not origin.w_redshift.isHidden():
@@ -957,7 +995,13 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
                 rSettings["outputName"] = rsOutput
                 rt.rendTimeType = 2  # needed for framepadding in outputpath
 
-        rt.renderSceneDialog.close()
+            if isRs and getattr(origin, "chb_tileJob", None) and origin.chb_tileJob.isChecked():
+                rt.execute("renderers.current.SeparateAovFiles = True")
+                rt.execute("renderers.current.SeparateLightGroupAovFiles = True")
+                rt.execute("renderers.current.RedshiftFileOutput = True")
+
+        rSettings["rendUseActiveView"] = rt.rendUseActiveView
+        rt.rendUseActiveView = True
 
         elementMgr = rt.maxOps.GetCurRenderElementMgr()
         rSettings["elementsActive"] = elementMgr.GetElementsActive()
@@ -973,6 +1017,8 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
                     passName,
                     os.path.basename(outputName).replace(
                         "beauty", passName
+                    ).replace(
+                        "Beauty", passName
                     ),
                 )
                 try:
@@ -1068,6 +1114,8 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
             rt.rendSaveFile = rSettings["savefile"]
         if "savefilepath" in rSettings:
             rt.rendOutputFilename = rSettings["savefilepath"]
+        if "rendUseActiveView" in rSettings:
+            rt.rendUseActiveView = rSettings["rendUseActiveView"]
 
     @err_catcher(name=__name__)
     def sm_render_getDeadlineParams(self, origin, dlParams, homeDir):
@@ -1083,6 +1131,7 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
         dlParams["pluginInfos"]["Version"] = str(self.getAppVersion(origin)[0] - 2 + 2000)
         dlParams["pluginInfos"]["MaxVersionToForce"] = dlParams["pluginInfos"]["Build"]
         dlParams["pluginInfos"]["PopupHandling"] = "1"
+        dlParams["pluginInfos"]["IgnoreMissingDLLs"] = "1"
 
         if origin.chb_resOverride.isChecked():
             resString = "Render"
@@ -1100,6 +1149,47 @@ animationrange = interval tmpanimrange.x tmpanimrange.y
             cams = self.getCamNodes(self)
             for idx, cam in enumerate(cams):
                 dlParams["pluginInfos"]["Camera%s" % idx] = self.getCamName(self, cam)
+
+        if dlParams["jobInfos"].get("TileJob") and self.getCurrentRenderer(self) == "Redshift_Renderer":
+            updateRsOutputPath = os.path.join(
+                homeDir, "temp", "setRedshiftOutputpath.ms"
+            )
+            script = """
+(
+        local du = DeadlineUtil  --this is the interface exposed by the Lightning Plug-in which provides communication between Deadline and 3ds Max
+        du.SetTitle "Pre Frame MXS Script" --set the job title
+        du.LogMessage "Starting PreFrame MXS Script..." --output a message to the log
+
+        fpath =  du.GetJobInfoEntry("RegionFilename" + (du.CurrentTask as string))
+        frameString = formattedPrint du.CurrentFrame format:"04d"
+        beautyPath = getFilenamePath(fpath) + getFilenameFile(fpath) + frameString + getFilenameType(fpath)
+
+        rendOutPutFilename = beautyPath
+        du.LogMessage("setting Redshift outputpath: " + beautyPath)
+        elementMgr = maxOps.GetCurRenderElementMgr()
+        for idx=0 to j=(elementMgr.NumRenderElements()-1) do
+        (
+                element = (maxOps.GetCurRenderElementMgr()).GetRenderElement(idx)
+                du.LogMessage("Redshift AOV enabled: " + (element.enabled as string))
+                rePath = substituteString fpath "beauty" element.elementName
+                rePath = substituteString rePath "Beauty" element.elementName
+                isCrypto = (element as string) == "ReferenceTarget:RsCryptomatte"
+                isBeauty = (element as string) == "ReferenceTarget:RsBeauty"
+                if isCrypto or isBeauty then (
+                    frameString = formattedPrint du.CurrentFrame format:"04d"
+                    rePath = getFilenamePath(rePath) + getFilenameFile(rePath) + frameString + getFilenameType(rePath)
+                )
+                elementMgr.SetRenderElementFilename idx rePath
+                du.LogMessage("set Redshift AOV outputpath: " + rePath)
+        )
+
+        true  --return true if the task has finished successfully, return false to fail the task.
+)--end script
+            """
+            with open(updateRsOutputPath, "w") as f:
+                f.write(script)
+            dlParams["pluginInfos"]["PreFrameScript"] = os.path.basename(updateRsOutputPath)
+            dlParams["arguments"].append(updateRsOutputPath)
 
         if dlParams["sceneDescription"] == "redshift":
             dlParams["pluginInfos"]["MAXScriptJob"] = "1"

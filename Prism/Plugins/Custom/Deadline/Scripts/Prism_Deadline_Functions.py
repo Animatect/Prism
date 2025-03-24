@@ -77,6 +77,11 @@ class Prism_Deadline_Functions(object):
                 "getOutputPath": self.getArnoldOutputPath,
                 "suffix": "_ass_export",
             },
+            "vray": {
+                "submitFunction": self.submitSceneDescriptionVray,
+                "getOutputPath": self.getVrayOutputPath,
+                "suffix": "_vrscene_export",
+            },
         }
         self.core.plugins.registerRenderfarmPlugin(self)
         self.core.registerCallback("onStateStartup", self.onStateStartup, plugin=self.plugin)
@@ -276,6 +281,11 @@ template = base + "_@product@@identifier@_@version@"]"""
         projectSettings.chb_submitScenes.setChecked(True)
         lo_deadline.addWidget(projectSettings.chb_submitScenes)
 
+        projectSettings.chb_scriptDeps = QCheckBox("Use Script Dependencies for Scene Description Jobs")
+        projectSettings.chb_scriptDeps.setToolTip("When checked Scene Description render jobs jobs will be submitted with script dependencies which makes tasks dependent on the existence of the scene description file. If unchecked normal job dependencies will be used.")
+        projectSettings.chb_scriptDeps.setChecked(True)
+        lo_deadline.addWidget(projectSettings.chb_scriptDeps)
+
         projectSettings.gb_dlPoolPresets = PresetWidget(self)
         projectSettings.gb_dlPoolPresets.setCheckable(True)
         projectSettings.gb_dlPoolPresets.setChecked(False)
@@ -304,6 +314,10 @@ template = base + "_@product@@identifier@_@version@"]"""
                 val = settings["deadline"]["submitScenes"]
                 origin.chb_submitScenes.setChecked(val)
 
+            if "useScriptDependencies" in settings["deadline"]:
+                val = settings["deadline"]["useScriptDependencies"]
+                origin.chb_scriptDeps.setChecked(val)
+
             if "usePoolPresets" in settings["deadline"]:
                 val = settings["deadline"]["usePoolPresets"]
                 origin.gb_dlPoolPresets.setChecked(val)
@@ -318,8 +332,15 @@ template = base + "_@product@@identifier@_@version@"]"""
         if "deadline" not in settings:
             settings["deadline"] = {}
             settings["deadline"]["submitScenes"] = origin.chb_submitScenes.isChecked()
+            settings["deadline"]["useScriptDependencies"] = origin.chb_scriptDeps.isChecked()
             settings["deadline"]["usePoolPresets"] = origin.gb_dlPoolPresets.isChecked()
             settings["deadline"]["poolPresets"] = origin.gb_dlPoolPresets.getPresetData()
+
+    @err_catcher(name=__name__)
+    def useScriptDependencies(self):
+        return self.core.getConfig(
+            "deadline", "useScriptDependencies", dft=True, config="project"
+        )
 
     @err_catcher(name=__name__)
     def prePublish(self, origin):
@@ -1085,6 +1106,7 @@ template = base + "_@product@@identifier@_@version@"]"""
         else:
             frameStr = ",".join([str(x) for x in frameRange])
 
+        renderSecondJob = False
         if isSecondJob:
             jobPrio = prio
             frameStr = frames
@@ -1123,8 +1145,6 @@ template = base + "_@product@@identifier@_@version@"]"""
                 
                 if not frameStr:
                     return result
-            else:
-                renderSecondJob = False
 
             jobPrio = origin.sp_rjPrio.value()
 
@@ -1190,7 +1210,7 @@ template = base + "_@product@@identifier@_@version@"]"""
             jobInfos["TileJobFrame"] = startFrame
             jobInfos["OverrideTaskExtraInfoNames"] = "false"
 
-        if sceneDescription or handleMaster or useBatch or jobInfos.get("TileJob"):
+        if sceneDescription or handleMaster or useBatch or jobInfos.get("TileJob") or renderSecondJob or isSecondJob:
             if jobInfos.get("TileJob"):
                 jobBatchName += " (%s tiles)" % rows**2
 
@@ -1232,30 +1252,41 @@ template = base + "_@product@@identifier@_@version@"]"""
             del jobInfos["OutputFilename0"]
             del jobInfos["ChunkSize"]
             del jobInfos["Frames"]
-            res = self.core.appPlugin.getResolution()
+            if origin.chb_resOverride.isChecked():
+                res = [origin.sp_resWidth.value(), origin.sp_resHeight.value()]
+            else:
+                res = self.core.appPlugin.getResolution()
+
             jobInfos["AssembledRenderWidth"] = res[0]
             jobInfos["AssembledRenderHeight"] = res[1]
             aovs = [""]
-            if self.core.appPlugin.pluginName == "3dsMax":
-                aovs += self.core.appPlugin.sm_render_getAovNames()
+        #    if self.core.appPlugin.pluginName == "3dsMax":
+        #        aovs += self.core.appPlugin.sm_render_getAovNames(rsFilter=True)
+
+            tileWidth = int(jobInfos["AssembledRenderWidth"] / rows)
+            tileHeight = int(jobInfos["AssembledRenderHeight"] / rows)
+            lastTileWidth = jobInfos["AssembledRenderWidth"] - (tileWidth * (rows-1))
+            lastTileHeight = jobInfos["AssembledRenderHeight"] - (tileHeight * (rows-1))
 
             for idx, aov in enumerate(aovs):
                 for row in range(rows):
                     for column in range(rows):
                         tileStr = "_tile_%sx%s_%sx%s_" % (column+1, row+1, rows, rows)
                         tileNum = (row*rows)+(column)
+                        curTileWidth = tileWidth if column != (rows-1) else lastTileWidth
+                        curTileHeight = tileHeight if row != (rows-1) else lastTileHeight
                         # tileOutname = base + tileStr + ".%04d" % startFrame + ext
 
                         if aov:
-                            aovBase = os.path.join(os.path.dirname(os.path.dirname(base)), aov, os.path.basename(base).replace("beauty", aov))
+                            aovBase = os.path.join(os.path.dirname(os.path.dirname(base)), aov, os.path.basename(base).replace("beauty", aov).replace("Beauty", aov))
                             tileOutname = aovBase + tileStr + "." + ext
                             pluginInfos["RegionReFilename%s_%s" % (tileNum, idx-1)] = tileOutname
                         else:
                             tileOutname = base + tileStr + "." + ext
-                            pluginInfos["RegionTop%s" % tileNum] = int((jobInfos["AssembledRenderHeight"] / rows) * row)
-                            pluginInfos["RegionBottom%s" % tileNum] = int(pluginInfos["RegionTop%s" % tileNum] + (jobInfos["AssembledRenderHeight"] / rows))
-                            pluginInfos["RegionLeft%s" % tileNum] = int((jobInfos["AssembledRenderWidth"] / rows) * column)
-                            pluginInfos["RegionRight%s" % tileNum] = int(pluginInfos["RegionLeft%s" % tileNum] + (jobInfos["AssembledRenderWidth"] / rows))
+                            pluginInfos["RegionTop%s" % tileNum] = int(tileHeight * row)
+                            pluginInfos["RegionBottom%s" % tileNum] = int(pluginInfos["RegionTop%s" % tileNum] + curTileHeight)
+                            pluginInfos["RegionLeft%s" % tileNum] = int(tileWidth * column)
+                            pluginInfos["RegionRight%s" % tileNum] = int(pluginInfos["RegionLeft%s" % tileNum] + curTileWidth)
                             pluginInfos["RegionFilename%s" % tileNum] = tileOutname
 
                         jobInfos["OutputFilename%sTile%s" % (idx, tileNum)] = tileOutname
@@ -1326,7 +1357,11 @@ template = base + "_@product@@identifier@_@version@"]"""
         if result:
             jobId = self.getJobIdFromSubmitResult(result)
             if dlParams["jobInfos"].get("TileJob"):
-                res = self.core.appPlugin.getResolution()
+                if origin.chb_resOverride.isChecked():
+                    res = [origin.sp_resWidth.value(), origin.sp_resHeight.value()]
+                else:
+                    res = self.core.appPlugin.getResolution()
+
                 self.submitDraftTileAssemblerJob(
                     jobName=dlParams["jobInfos"]["Name"],
                     jobOutput=jobOutputFile,
@@ -1345,6 +1380,28 @@ template = base + "_@product@@identifier@_@version@"]"""
                     resY=res[1],
                     startFrame=startFrame,
                     jobDependencies=[jobId],
+                    cropped=False
+                )
+
+                self.submitDraftTileAssemblerJob(
+                    jobName=dlParams["jobInfos"]["Name"],
+                    jobOutput=jobOutputFile,
+                    jobPool=dlParams["jobInfos"]["Pool"],
+                    jobSndPool=dlParams["jobInfos"]["SecondaryPool"],
+                    jobGroup=dlParams["jobInfos"]["Group"],
+                    jobPrio=dlParams["jobInfos"]["Priority"],
+                    jobTimeOut=dlParams["jobInfos"]["TaskTimeoutMinutes"],
+                    jobMachineLimit=dlParams["jobInfos"]["MachineLimit"],
+                    jobConcurrentTasks=dlParams["jobInfos"].get("ConcurrentTasks"),
+                    jobBatchName=dlParams["jobInfos"].get("BatchName"),
+                    suspended=dlParams["jobInfos"].get("InitialStatus") == "Suspended",
+                    state=origin,
+                    rows=rows,
+                    resX=res[0],
+                    resY=res[1],
+                    startFrame=startFrame,
+                    jobDependencies=[jobId],
+                    cropped=True,
                 )
 
             if handleMaster and not isSecondJob:
@@ -1400,14 +1457,19 @@ sys.path.append(root + "/Scripts")
 import PrismCore
 pcore = PrismCore.create(prismArgs=["noUI", "loadProject"])
 path = r\"%s\"
-""" % (self.core.prismRoot, jobOutputFile)
+""" % (self.core.prismRoot, os.path.expandvars(jobOutputFile))
 
         if masterType == "media":
+            if self.core.appPlugin.appType == "2d":
+                mediaType = "2drenders"
+            else:
+                mediaType = "3drenders"
+
             masterAction = origin.cb_master.currentText()
             if masterAction == "Set as master":
-                code += "pcore.mediaProducts.updateMasterVersion(path)"
+                code += "pcore.mediaProducts.updateMasterVersion(path, mediaType=\"%s\")" % mediaType
             elif masterAction == "Add to master":
-                code += "pcore.mediaProducts.addToMasterVersion(path)"
+                code += "pcore.mediaProducts.addToMasterVersion(path, mediaType=\"%s\")" % mediaType
         elif masterType == "product":
             code += "pcore.products.updateMasterVersion(path)"
 
@@ -1442,7 +1504,11 @@ path = r\"%s\"
 
     @err_catcher(name=__name__)
     def submitSceneDescriptionMantra(self, origin, jobId, jobOutputFile, jobOutputFileOrig, allowCleanup, jobParams):
-        dep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        if self.useScriptDependencies():
+            dep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        else:
+            dep = [{"jobids": [jobId], "type": "job"}]
+
         args = [jobOutputFile, jobOutputFileOrig]
         if self.core.getConfig(
             "render", "MantraCleanupJob", dft=True, config="project"
@@ -1479,7 +1545,11 @@ path = r\"%s\"
     @err_catcher(name=__name__)
     def submitSceneDescription3Delight(self, origin, jobId, jobOutputFile, jobOutputFileOrig, allowCleanup, jobParams):
         code = origin.curRenderer.getNsiRenderScript()
-        nsiDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        if self.useScriptDependencies():
+            nsiDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        else:
+            nsiDep = [{"jobids": [jobId], "type": "job"}]
+
         dlpath = os.getenv("DELIGHT")
         environment = [["DELIGHT", dlpath]]
         args = [jobOutputFile, jobOutputFileOrig]
@@ -1514,7 +1584,7 @@ path = r\"%s\"
             cleanupScript = None
 
         if cleanupScript:
-            arguments = ["\"%s\"" % args[0]]
+            arguments = [args[0]]
             depId = self.getJobIdFromSubmitResult(result)
             if depId:
                 cleanupDep = [depId]
@@ -1542,7 +1612,11 @@ path = r\"%s\"
 
     @err_catcher(name=__name__)
     def submitSceneDescriptionRedshift(self, origin, jobId, jobOutputFile, jobOutputFileOrig, allowCleanup, jobParams):
-        rsDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        if self.useScriptDependencies():
+            rsDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        else:
+            rsDep = [{"jobids": [jobId], "type": "job"}]
+
         args = [jobOutputFile, jobOutputFileOrig]
         gpusPerTask = origin.sp_dlGPUpt.value()
         gpuDevices = origin.le_dlGPUdevices.text()
@@ -1581,7 +1655,11 @@ path = r\"%s\"
 
     @err_catcher(name=__name__)
     def submitSceneDescriptionArnold(self, origin, jobId, jobOutputFile, jobOutputFileOrig, allowCleanup, jobParams):
-        rsDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        if self.useScriptDependencies():
+            rsDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        else:
+            rsDep = [{"jobids": [jobId], "type": "job"}]
+
         args = [jobOutputFile, jobOutputFileOrig]
         if self.core.getConfig(
             "render", "ArnoldCleanupJob", dft=True, config="project"
@@ -1593,6 +1671,45 @@ path = r\"%s\"
         jobData = jobParams
         basename = jobData["jobInfos"]["Name"][:-len(self.sceneDescriptions["arnold"]["suffix"])]
         result = self.submitArnoldJob(
+            jobName=basename + "_render",
+            jobOutput=jobOutputFileOrig,
+            jobPrio=jobData["jobInfos"]["Priority"],
+            jobPool=jobData["jobInfos"]["Pool"],
+            jobSndPool=jobData["jobInfos"]["SecondaryPool"],
+            jobGroup=jobData["jobInfos"]["Group"],
+            jobTimeOut=jobData["jobInfos"]["TaskTimeoutMinutes"],
+            jobMachineLimit=jobData["jobInfos"]["MachineLimit"],
+            jobFramesPerTask=jobData["jobInfos"]["ChunkSize"],
+            jobConcurrentTasks=jobData["jobInfos"].get("ConcurrentTasks"),
+            jobBatchName=jobData["jobInfos"].get("BatchName"),
+            frames=jobData["jobInfos"]["Frames"],
+            suspended=jobData["jobInfos"].get("InitialStatus") == "Suspended",
+            dependencies=rsDep,
+            archivefile=jobOutputFile,
+            args=args,
+            cleanupScript=cleanupScript,
+            state=origin,
+        )
+        return result
+
+    @err_catcher(name=__name__)
+    def submitSceneDescriptionVray(self, origin, jobId, jobOutputFile, jobOutputFileOrig, allowCleanup, jobParams):
+        if self.useScriptDependencies():
+            rsDep = [{"offset": 0, "filepath": jobOutputFile, "type": "file"}]
+        else:
+            rsDep = [{"jobids": [jobId], "type": "job"}]
+
+        args = [jobOutputFile, jobOutputFileOrig]
+        if self.core.getConfig(
+            "render", "VrayCleanupJob", dft=True, config="project"
+        ) and allowCleanup:
+            cleanupScript = origin.curRenderer.getCleanupScript()
+        else:
+            cleanupScript = None
+
+        jobData = jobParams
+        basename = jobData["jobInfos"]["Name"][:-len(self.sceneDescriptions["vray"]["suffix"])]
+        result = self.submitVrayJob(
             jobName=basename + "_render",
             jobOutput=jobOutputFileOrig,
             jobPrio=jobData["jobInfos"]["Priority"],
@@ -1639,17 +1756,24 @@ path = r\"%s\"
 
     @err_catcher(name=__name__)
     def getArnoldOutputPath(self, origin, jobOutputFile):
-        jobOutputFile = os.path.join(
-            os.path.dirname(jobOutputFile), "_ass", os.path.basename(jobOutputFile)
+        jobOutputFile = origin.curRenderer.getAssOutputPath(
+            origin, jobOutputFile
         )
-        jobOutputFile = os.path.splitext(jobOutputFile)[0] + ".ass"
+        return jobOutputFile
+
+    @err_catcher(name=__name__)
+    def getVrayOutputPath(self, origin, jobOutputFile):
+        jobOutputFile = os.path.join(
+            os.path.dirname(jobOutputFile), "_vrscene", os.path.basename(jobOutputFile)
+        )
+        jobOutputFile = os.path.splitext(jobOutputFile)[0] + ".vrscene"
         return jobOutputFile
 
     @err_catcher(name=__name__)
     def submitPythonJob(
         self,
         code="",
-        version="3.9",
+        version="3.11",
         jobName=None,
         jobOutput=None,
         jobPool="None",
@@ -1820,6 +1944,7 @@ path = r\"%s\"
         resX=1920,
         resY=1080,
         startFrame=1,
+        cropped=False,
     ):
         homeDir = (
             self.CallDeadlineCommand(["-GetCurrentUserHomeDirectory"])
@@ -1835,43 +1960,55 @@ path = r\"%s\"
                 0
             ].strip("_")
 
-        aovs = [""]
+        assemblies = []
+        if not cropped:
+            assemblies.append({"key": "", "path": jobOutput})
+
         if self.core.appPlugin.pluginName == "3dsMax":
-            aovs += self.core.appPlugin.sm_render_getAovNames()
+            aovs = self.core.appPlugin.sm_render_getAovNamesRedshiftLightGroups()
+            for aov in aovs:
+                if aov["aovType"] != "ReferenceTarget:RsBeauty":
+                    if (cropped and aov["aovType"] != "ReferenceTarget:RsCryptomatte") or (not cropped and aov["aovType"] == "ReferenceTarget:RsCryptomatte"):
+                        filename = os.path.basename(jobOutput).replace("beauty", aov["name"]).replace("Beauty", aov["name"])
+                        aovPath = os.path.join(os.path.dirname(os.path.dirname(jobOutput)), aov["name"], filename)
+                        assemblies.append({"key": "_" + aov["name"], "path": aovPath})
+
+                if not cropped:
+                    for lightAov in aov["lightgroups"]:
+                        lightAovName = aov["name"] + "_" + lightAov
+                        filename = os.path.basename(jobOutput).replace("beauty", lightAovName).replace("Beauty", lightAovName)
+                        aovPath = os.path.join(os.path.dirname(os.path.dirname(jobOutput)), aov["name"], filename)
+                        assemblies.append({"key": "_" + lightAovName, "path": aovPath})
 
         cfgFiles = []
-        for idx, aov in enumerate(aovs):
-            if aov:
-                aovKey = "_" + aov
-            else:
-                aovKey = aov
-
+        for idx, assembly in enumerate(assemblies):
             cfgFile = os.path.join(
-                homeDir, "temp", "%s%s_%s.txt" % (jobName, aovKey, int(time.time()))
+                homeDir, "temp", "%s%s_%s.txt" % (jobName, assembly["key"], int(time.time()))
             )
 
-            if aov:
-                aovPath = os.path.join(os.path.dirname(os.path.dirname(jobOutput)), aov, os.path.basename(jobOutput).replace("beauty", aov))
-            else:
-                aovPath = jobOutput
-
             cfgData = {
-                "ImageFileName": aovPath,
+                "ImageFileName": assembly["path"],
                 "TileCount": rows**2,
-                "TilesCropped": True,
+                "TilesCropped": cropped,
                 "DistanceAsPixels": True,
                 "ImageWidth": resX,
                 "ImageHeight": resY,
             }
-            base, ext = os.path.splitext(aovPath)
+            base, ext = os.path.splitext(assembly["path"])
+            tileWidth = int(resX / rows)
+            tileHeight = int(resY / rows)
+            lastTileWidth = resX - (tileWidth * (rows-1))
+            lastTileHeight = resY - (tileHeight * (rows-1))
             for row in range(rows):
                 for column in range(rows):
                     tileStr = "_tile_%sx%s_%sx%s_" % (column+1, row+1, rows, rows)
                     tileNum = (row*rows)+(column)
                     cfgData["Tile%sFileName" % tileNum] = base + tileStr + ".%04d" % startFrame + ext
                     # cfgData["Tile%sFileName" % tileNum] = base + tileStr + ext
-                    cfgData["Tile%sX" % tileNum] = (resX / rows) * column
-                    cfgData["Tile%sY" % tileNum] = resY - ((resY / rows) * (row + 1))
+                    cfgData["Tile%sWidth" % tileNum] = tileWidth if column != (rows-1) else lastTileWidth
+                    cfgData["Tile%sHeight" % tileNum] = tileHeight if row != (rows-1) else lastTileHeight
+                    cfgData["Tile%sX" % tileNum] = tileWidth * column
+                    cfgData["Tile%sY" % tileNum] = resY - ((tileHeight * row) + cfgData["Tile%sHeight" % tileNum])
 
             with open(cfgFile, "w") as fileHandle:
                 for key in cfgData:
@@ -1887,14 +2024,17 @@ path = r\"%s\"
         jobInfos = {}
 
         jobInfos["Name"] = jobName.replace(" - Tile Render", "") + " - Draft Tile Assembly"
+        if cropped:
+            jobInfos["Name"] += " (cropped)"
+
         jobInfos["Pool"] = jobPool
         jobInfos["SecondaryPool"] = jobSndPool
         jobInfos["Group"] = jobGroup
         jobInfos["Priority"] = jobPrio
         jobInfos["TaskTimeoutMinutes"] = jobTimeOut
         jobInfos["MachineLimit"] = jobMachineLimit
-        if len(aovs) > 1:
-            jobInfos["Frames"] = "0-%s" % (len(aovs)-1)
+        if len(assemblies) > 1:
+            jobInfos["Frames"] = "0-%s" % (len(assemblies)-1)
         else:
             jobInfos["Frames"] = frames
         jobInfos["ChunkSize"] = jobFramesPerTask
@@ -1912,9 +2052,11 @@ path = r\"%s\"
         if jobOutput:
             jobInfos["OutputFilename0"] = jobOutput
             if self.core.appPlugin.pluginName == "3dsMax":
-                aovs = self.core.appPlugin.sm_render_getAovNames()
-                for idx, aov in enumerate(aovs):
-                    jobInfos["OutputFilename%s" % (idx + 1)] = os.path.join(os.path.dirname(os.path.dirname(jobOutput)), aov, os.path.basename(jobOutput).replace("beauty", aov))
+                num = 1
+                for idx, assembly in enumerate(assemblies):
+                    if assembly["key"]:
+                        jobInfos["OutputFilename%s" % (num)] = assembly["path"]
+                        num += 1
 
         if suspended:
             jobInfos["InitialStatus"] = "Suspended"
@@ -2105,7 +2247,7 @@ path = r\"%s\"
 
         if cleanupScript:
             jobName = jobName.rsplit("_", 1)[0]
-            arguments = ["\"%s\"" % args[0]]
+            arguments = [args[0]]
             depId = self.getJobIdFromSubmitResult(result)
             if depId:
                 cleanupDep = [depId]
@@ -2271,7 +2413,7 @@ path = r\"%s\"
 
         if cleanupScript:
             jobName = jobName.rsplit("_", 1)[0]
-            arguments = ["\"%s\"" % args[0]]
+            arguments = [args[0]]
             depId = self.getJobIdFromSubmitResult(result)
             if depId:
                 cleanupDep = [depId]
@@ -2432,7 +2574,169 @@ path = r\"%s\"
 
         if cleanupScript:
             jobName = jobName.rsplit("_", 1)[0]
-            arguments = ["\"%s\"" % args[0]]
+            arguments = [args[0]]
+            depId = self.getJobIdFromSubmitResult(result)
+            if depId:
+                cleanupDep = [depId]
+            else:
+                cleanupDep = None
+
+            result = self.submitCleanupScript(
+                jobName=jobName,
+                jobPool=jobPool,
+                jobSndPool=jobSndPool,
+                jobGroup=jobGroup,
+                jobPrio=jobPrio,
+                jobTimeOut=jobTimeOut,
+                jobMachineLimit=jobMachineLimit,
+                jobComment=jobComment,
+                jobBatchName=jobBatchName,
+                suspended=suspended,
+                jobDependencies=cleanupDep,
+                environment=environment,
+                cleanupScript=cleanupScript,
+                arguments=arguments,
+                state=state,
+            )
+
+        return result
+
+    @err_catcher(name=__name__)
+    def submitVrayJob(
+        self,
+        jobName=None,
+        jobOutput=None,
+        jobPool="None",
+        jobSndPool="None",
+        jobGroup="None",
+        jobPrio=50,
+        jobTimeOut=180,
+        jobMachineLimit=0,
+        jobFramesPerTask=1,
+        jobConcurrentTasks=None,
+        jobComment=None,
+        jobBatchName=None,
+        frames="1",
+        suspended=False,
+        dependencies=None,
+        archivefile=None,
+        environment=None,
+        args=None,
+        cleanupScript=None,
+        state=None,
+    ):
+        homeDir = (
+            self.CallDeadlineCommand(["-GetCurrentUserHomeDirectory"])
+        )
+
+        if homeDir is False:
+            return "Execute Canceled: Deadline is not installed"
+
+        homeDir = homeDir.replace("\r", "").replace("\n", "")
+
+        if not jobName:
+            jobName = os.path.splitext(self.core.getCurrentFileName(path=False))[
+                0
+            ].strip("_")
+
+        environment = environment or []
+        environment.insert(0, ["prism_project", self.core.prismIni.replace("\\", "/")])
+
+        # Create submission info file
+
+        jobInfos = {}
+
+        jobInfos["Name"] = jobName
+        jobInfos["Pool"] = jobPool
+        jobInfos["SecondaryPool"] = jobSndPool
+        jobInfos["Group"] = jobGroup
+        jobInfos["Priority"] = jobPrio
+        jobInfos["TaskTimeoutMinutes"] = jobTimeOut
+        jobInfos["MachineLimit"] = jobMachineLimit
+        jobInfos["Frames"] = frames
+        jobInfos["ChunkSize"] = jobFramesPerTask
+        for idx, env in enumerate(environment):
+            self.addEnvironmentItem(jobInfos, env[0], env[1])
+
+        if os.getenv("PRISM_LAUNCH_ENV"):
+            envData = self.core.configs.readJson(data=os.getenv("PRISM_LAUNCH_ENV"))
+            for item in envData.items():
+                self.addEnvironmentItem(jobInfos, item[0], item[1])
+
+        jobInfos["Plugin"] = "Vray"
+        jobInfos["Comment"] = jobComment or "Prism-Submission-Vray"
+
+        if jobOutput:
+            jobInfos["OutputFilename0"] = jobOutput
+
+        if suspended:
+            jobInfos["InitialStatus"] = "Suspended"
+
+        if jobConcurrentTasks:
+            jobInfos["ConcurrentTasks"] = jobConcurrentTasks
+
+        if jobBatchName:
+            jobInfos["BatchName"] = jobBatchName
+
+        if dependencies:
+            depType = dependencies[0]["type"]
+            jobInfos["IsFrameDependent"] = "false" if depType == "job" else "true"
+            if depType in ["job", "frame"]:
+                jobids = []
+                for dep in dependencies:
+                    jobids += dep["jobids"]
+
+                jobInfos["JobDependencies"] = ",".join(jobids)
+            elif depType == "file":
+                jobInfos["ScriptDependencies"] = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "DeadlineDependency.py")
+                )
+
+        # Create plugin info file
+
+        pluginInfos = {}
+
+        startFrame = frames.split("-")[0].split(",")[0]
+        paddedStartFrame = str(startFrame).zfill(self.core.framePadding)
+        pluginInfos["InputFilename"] = archivefile.replace(
+            "#" * self.core.framePadding, paddedStartFrame
+        )
+        pluginInfos["SeparateFilesPerFrame"] = True
+
+        dlParams = {
+            "jobInfos": jobInfos,
+            "pluginInfos": pluginInfos,
+            "jobInfoFile": os.path.join(homeDir, "temp", "vray_plugin_info.job"),
+            "pluginInfoFile": os.path.join(homeDir, "temp", "vray_job_info.job"),
+        }
+
+        if dependencies and dependencies[0]["type"] == "file":
+            dependencyFile = os.path.join(homeDir, "temp", "dependencies.txt")
+            fileHandle = open(dependencyFile, "w")
+
+            for dependency in dependencies:
+                fileHandle.write(str(dependency["offset"]) + "\n")
+                fileHandle.write(str(dependency["filepath"]) + "\n")
+
+            fileHandle.close()
+
+        arguments = []
+        arguments.append(dlParams["jobInfoFile"])
+        arguments.append(dlParams["pluginInfoFile"])
+
+        for i in getattr(self.core.appPlugin, "getCurrentSceneFiles", self.getCurrentSceneFiles)(self):
+            arguments.append(i)
+
+        if "dependencyFile" in locals():
+            arguments.append(dependencyFile)
+
+        result = self.deadlineSubmitJob(jobInfos, pluginInfos, arguments)
+        if state:
+            self.registerSubmittedJob(state, result, dlParams)
+
+        if cleanupScript:
+            jobName = jobName.rsplit("_", 1)[0]
+            arguments = [args[0]]
             depId = self.getJobIdFromSubmitResult(result)
             if depId:
                 cleanupDep = [depId]
@@ -2531,6 +2835,9 @@ path = r\"%s\"
         for line in jobResult.split("\n"):
             if "Key-value pair not supported" in line:
                 logger.debug("Deadline Submission Warning: %s" % line)
+
+        if "Error: " in jobResult:
+            logger.warning(jobResult)
 
         self.core.callback(name="postSubmit_Deadline", args=[self, jobResult, jobInfos, pluginInfos, arguments],)
 

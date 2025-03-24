@@ -36,13 +36,9 @@ import sys
 import time
 import traceback
 
-try:
-    from PySide2.QtCore import *
-    from PySide2.QtGui import *
-    from PySide2.QtWidgets import *
-except:
-    from PySide.QtCore import *
-    from PySide.QtGui import *
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 
 import hou
 
@@ -101,14 +97,10 @@ class DependencyClass(object):
         if "dependencies" in data:
             self.dependencies = eval(data["dependencies"])
         if "stateenabled" in data:
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         self.core.callback("onStateSettingsLoaded", self, data)
         self.updateUi()
@@ -245,5 +237,5 @@ class DependencyClass(object):
             "dependencyType": self.cb_depType.currentText(),
             "frameoffset": self.sp_offset.value(),
             "dependencies": str(self.dependencies),
-            "stateenabled": str(self.state.checkState(0)),
+            "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
         }

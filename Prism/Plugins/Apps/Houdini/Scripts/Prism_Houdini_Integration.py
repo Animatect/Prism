@@ -130,13 +130,17 @@ class Prism_Houdini_Integration(object):
 
     def addIntegration(self, installPath):
         try:
+            confirmed = False
             if not os.path.exists(installPath):
-                msg = "Invalid Houdini path: %s.\n\nThe path has to be the Houdini preferences folder, which usually looks like this: (with your Houdini version):\n\n%s" % (installPath, self.examplePath)
-                self.core.popup(msg)
-                return False
+                msg = "Houdini path doesn't exist:\n\n%s\n\nThe path has to be the Houdini preferences folder, which usually looks like this: (with your Houdini version):\n\n%s" % (installPath, self.examplePath)
+                result = self.core.popupQuestion(msg, buttons=["Continue", "Cancel"], icon=QMessageBox.Warning, default="Continue")
+                if result != "Continue":
+                    return False
+
+                confirmed = True
 
             houPath = os.path.join(installPath, "bin")
-            if os.path.exists(houPath):
+            if os.path.exists(houPath) and not confirmed:
                 msg = "The selected folder seems to be the Houdini installation folder. The Prism integration has to be installed to your Houdini preferences folder. Are you sure you want to continue?\n\n%s" % installPath
                 result = self.core.popupQuestion(msg, icon=QMessageBox.Warning, default="No")
                 if result == "No":

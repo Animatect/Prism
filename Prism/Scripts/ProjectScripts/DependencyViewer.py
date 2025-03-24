@@ -35,6 +35,7 @@
 import os
 import sys
 import datetime
+import glob
 
 from qtpy.QtCore import *
 from qtpy.QtGui import *
@@ -60,21 +61,12 @@ class DependencyViewer(QDialog, DependencyViewer_ui.Ui_dlg_DependencyViewer):
         self.core = core
         self.core.parentWindow(self)
 
-        if os.path.basename(depRoot).startswith("versioninfo"):
-            rootName = self.core.getConfig("version", configPath=depRoot)
-        else:
-            rootName = self.core.getConfig("filename", configPath=depRoot)
-
-        self.l_root.setText(rootName)
-
         self.tw_dependencies.setHeaderLabels(["Name", "", "Type", "Date", "Path"])
         self.tw_dependencies.header().setSectionResizeMode(1, QHeaderView.Fixed)
 
         self.dependencies = {}
-        self.depRoot = depRoot
-
         self.connectEvents()
-        self.updateDependencies("0", depRoot)
+        self.setRoot(depRoot)
 
         self.tw_dependencies.setColumnWidth(0, 400)
         self.tw_dependencies.setColumnWidth(1, 10)
@@ -83,6 +75,24 @@ class DependencyViewer(QDialog, DependencyViewer_ui.Ui_dlg_DependencyViewer):
         self.tw_dependencies.resizeColumnToContents(4)
 
         self.core.callback(name="onDependencyViewerOpen", args=[self])
+
+    @err_catcher(name=__name__)
+    def setRoot(self, root):
+        self.depRoot = root
+
+        if os.path.basename(self.depRoot).startswith("versioninfo"):
+            rootName = self.core.getConfig("version", configPath=self.depRoot)
+        elif os.path.splitext(os.path.basename(self.depRoot))[0].endswith("versioninfo"):
+            filenames = glob.glob(os.path.splitext(self.depRoot)[0][:-(len("versionInfo"))] + ".*")
+            for filename in sorted(filenames):
+                if os.path.splitext(filename)[1] != self.core.configs.getProjectExtension():
+                    rootName = os.path.basename(filename)
+                    break
+        else:
+            rootName = self.core.getConfig("filename", configPath=self.depRoot)
+
+        self.l_root.setText(rootName)
+        self.updateDependencies("0", self.depRoot)
 
     @err_catcher(name=__name__)
     def connectEvents(self):
@@ -117,12 +127,13 @@ class DependencyViewer(QDialog, DependencyViewer_ui.Ui_dlg_DependencyViewer):
         else:
             return
 
-        iname = lw.indexAt(pos).data()
-
+        index = lw.indexAt(pos)
+        iname = index.data()
         if iname is None:
             return
 
-        dirPath = lw.model().index(lw.indexAt(pos).row(), 4).data()
+        item = lw.itemFromIndex(index)
+        dirPath = item.data(4, Qt.DisplayRole)
 
         openex = QAction("Open in Explorer", self)
         openex.triggered.connect(lambda: self.core.openFolder(dirPath))
@@ -242,7 +253,6 @@ class DependencyViewer(QDialog, DependencyViewer_ui.Ui_dlg_DependencyViewer):
             )
 
             item.setForeground(1, existColor)
-
             depItem.addChild(item)
 
             curID = str(len(self.dependencies) + 1)

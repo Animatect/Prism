@@ -56,12 +56,12 @@ from UserInterfaces import ItemList_ui
 
 
 class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
-    def __init__(self, core, entity="passes", mode=None):
+    def __init__(self, core, entities=None, mode="passes"):
         QDialog.__init__(self)
         self.setupUi(self)
 
         self.core = core
-        self.entity = entity
+        self.entities = entities
         self.mode = mode
 
         self.tw_steps.setColumnCount(2)
@@ -69,14 +69,12 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
         self.tw_steps.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
 
         if (
-            not isinstance(self.entity, collections.Mapping)
-            or self.entity["type"] not in ["asset", "shot", "sequence"]
+            mode != "departments"
             or (
-                self.entity["type"] == "asset"
+                self.entities[0]["type"] == "asset"
                 and self.core.compareVersions(self.core.projectVersion, "v1.2.1.6")
                 == "lower"
             )
-            or mode is not None
         ):
             self.chb_category.setVisible(False)
         else:
@@ -86,11 +84,7 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
         self.buttonBox.clicked.connect(self.buttonboxClicked)
 
         self.btext = "Next"
-        if isinstance(self.entity, collections.Mapping) and self.entity["type"] in [
-            "asset",
-            "shot",
-            "sequence"
-        ] and (self.mode != "tasks" or self.core.appPlugin.pluginName != "Standalone"):
+        if self.entities and (self.mode == "departments" or self.core.appPlugin.pluginName != "Standalone"):
             self.b_next = self.buttonBox.addButton(self.btext, QDialogButtonBox.AcceptRole)
             if self.mode == "tasks":
                 toolTip = "Create tasks and create a new scene from the current scene"
@@ -104,6 +98,31 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
             )
             icon = self.core.media.getColoredIcon(iconPath)
             self.b_next.setIcon(icon)
+
+            if self.mode == "departments":
+                self.w_taskPreset = QWidget()
+                self.lo_taskPreset = QHBoxLayout(self.w_taskPreset)
+                self.lo_taskPreset.setContentsMargins(0, 0, 0, 0)
+                self.chb_taskPreset = QCheckBox("Task Preset")
+                self.cb_taskPreset = QComboBox()
+                self.lo_taskPreset.addWidget(self.chb_taskPreset)
+                self.lo_taskPreset.addWidget(self.cb_taskPreset)
+                self.lo_taskPreset.addStretch()
+                self.cb_taskPreset.setEnabled(self.chb_taskPreset.isChecked())
+                self.chb_taskPreset.toggled.connect(self.cb_taskPreset.setEnabled)
+                self.chb_taskPreset.toggled.connect(lambda state: self.tw_steps.setEnabled(not state))
+                self.chb_taskPreset.toggled.connect(lambda state: self.chb_category.setEnabled(not state))
+                self.chb_taskPreset.toggled.connect(lambda state: self.enableOk())
+                if self.entities[0]["type"] in ["asset"]:
+                    presets = self.core.projects.getAssetTaskPresets()
+                else:
+                    presets = self.core.projects.getShotTaskPresets()
+
+                if presets:
+                    for preset in presets:
+                        self.cb_taskPreset.addItem(preset.get("name", ""), preset)
+
+                    self.verticalLayout.insertWidget(2, self.w_taskPreset)
 
         if self.mode == "tasks":
             self.e_tasks = QLineEdit()
@@ -127,14 +146,10 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
 
     @err_catcher(name=__name__)
     def rclList(self, pos):
-        if isinstance(self.entity, collections.Mapping) and self.entity["type"] in [
-            "asset",
-            "shot",
-            "sequence",
-        ]:
+        if self.entities:
             rcmenu = QMenu(self)
 
-            if self.mode is None:
+            if self.mode == "departments":
                 exp = QAction("Create new department...", self)
                 exp.triggered.connect(self.createDepartment)
                 rcmenu.addAction(exp)
@@ -152,17 +167,13 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
     @err_catcher(name=__name__)
     def selectionChanged(self):
         self.enableOk()
-        if isinstance(self.entity, collections.Mapping) and self.entity["type"] in [
-            "asset",
-            "shot",
-            "sequence",
-        ] and self.mode is None:
+        if self.mode == "departments":
             items = self.tw_steps.selectedItems()
             if len(items) == 0:
                 txt = "Create default tasks"
             elif len(items) == 1:
                 abbr = items[0].data(Qt.UserRole)["abbreviation"]
-                defaultTasks = self.core.entities.getDefaultTasksForDepartment(self.entity["type"], abbr)
+                defaultTasks = self.core.entities.getDefaultTasksForDepartment(self.entities[0]["type"], abbr)
                 if defaultTasks:
                     txt = "Create default tasks: \"%s\"" % "\", \"".join(defaultTasks)
                 else:
@@ -177,22 +188,33 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
         enabled = len(self.tw_steps.selectedItems()) > 0
         if self.mode == "tasks" and self.e_tasks.text():
             enabled = True
+        elif self.getTaskPreset():
+            enabled = True
 
         self.buttonBox.button(QDialogButtonBox.Ok).setEnabled(enabled)
         if self.core.appPlugin.pluginName != "Standalone" or self.mode != "tasks":
-            if isinstance(self.entity, collections.Mapping) and self.entity["type"] in [
-                "asset",
-                "shot",
-                "sequence",
-            ] and self.mode is None:
-                nextEnabled = len([x for x in self.tw_steps.selectedItems() if x.column() == 0]) == 1
+            if self.mode == "departments":
+                nextEnabled = len([x for x in self.tw_steps.selectedItems() if x.column() == 0]) == 1 and not self.getTaskPreset()
                 self.b_next.setEnabled(nextEnabled)
             elif self.mode == "tasks":
                 self.b_next.setEnabled(bool(enabled or self.e_tasks.text()))
 
     @err_catcher(name=__name__)
+    def getTaskPreset(self):
+        if not self.entities:
+            return
+
+        if self.mode != "departments":
+            return
+
+        if not self.chb_taskPreset.isChecked():
+            return
+
+        return self.cb_taskPreset.currentData()
+
+    @err_catcher(name=__name__)
     def createDepartment(self):
-        self.dlg_department = PrismWidgets.CreateDepartmentDlg(core=self.core, entity=self.entity["type"], parent=self)
+        self.dlg_department = PrismWidgets.CreateDepartmentDlg(core=self.core, entity=self.entities[0]["type"], parent=self)
         self.dlg_department.departmentCreated.connect(self.onDepartmentCreated)
         self.dlg_department.exec_()
 
@@ -205,9 +227,9 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
     def manageTasks(self):
         self.close()
         dlg = self.core.prismSettings(tab="Departments", settingsType="Project")
-        entity = self.core.pb.sceneBrowser.getCurrentEntity()
+        entities = self.core.pb.sceneBrowser.getCurrentEntities()
         dep = self.core.pb.sceneBrowser.getCurrentDepartment()
-        if entity.get("type") == "asset":
+        if entities[0].get("type") == "asset":
             for idx in range(dlg.w_project.tw_assetDepartments.rowCount()):
                 itemDep = dlg.w_project.tw_assetDepartments.item(idx, 0).data(Qt.UserRole).get("abbreviation")
                 if itemDep == dep:
@@ -217,7 +239,7 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
                 return
 
             dlg.w_project.tw_assetDepartments.selectRow(row)
-        elif entity.get("type") in ["shot", "sequence"]:
+        elif entities[0].get("type") in ["shot", "sequence"]:
             for idx in range(dlg.w_project.tw_shotDepartments.rowCount()):
                 itemDep = dlg.w_project.tw_shotDepartments.item(idx, 0).data(Qt.UserRole).get("abbreviation")
                 if itemDep == dep:
@@ -241,16 +263,28 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
     @err_catcher(name=__name__)
     def buttonboxClicked(self, button):
         if button.text() == "Create":
-            if self.mode is None:
-                if self.entity == "passes":
-                    pass
+            if self.mode == "passes":
+                pass
+            elif self.mode == "departments":
+                preset = self.getTaskPreset()
+                if preset:
+                    createdDirs = False
+                    for entity in self.entities:
+                        result = self.core.entities.createTasksFromPreset(entity, preset)
+                        if result:
+                            createdDirs = True
+
+                    if createdDirs:
+                        self.core.pb.sceneBrowser.refreshDepartments()
+
                 else:
                     steps = []
                     for i in self.tw_steps.selectedItems():
                         if i.column() == 0:
                             steps.append(i.data(Qt.UserRole)["abbreviation"])
 
-                    self.core.pb.sceneBrowser.createSteps(self.entity, steps, createTask=self.chb_category.isChecked())
+                    self.core.pb.sceneBrowser.createSteps(self.entities, steps, createTask=self.chb_category.isChecked())
+
             elif self.mode == "tasks":
                 tasks = []
                 for item in self.tw_steps.selectedItems():
@@ -262,11 +296,7 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
 
             self.accept()
         elif button.text() == self.btext:
-            if isinstance(self.entity, collections.Mapping) and self.entity["type"] in [
-                "asset",
-                "shot",
-                "sequence"
-            ]:
+            if self.entities:
                 self.stepBbClicked(button)
                 self.accept()
 
@@ -276,12 +306,12 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
     @err_catcher(name=__name__)
     def stepBbClicked(self, button):
         if button.text() == self.btext:
-            if self.mode is None:
+            if self.mode == "departments":
                 for i in self.tw_steps.selectedItems():
                     if i.column() == 0:
                         step = i.data(Qt.UserRole)["abbreviation"]
 
-                self.core.pb.sceneBrowser.createSteps(self.entity, [step], createTask=False)
+                self.core.pb.sceneBrowser.createSteps(self.entities, [step], createTask=False)
                 self.close()
                 self.core.pb.sceneBrowser.createTaskDlg()
             elif self.mode == "tasks":
@@ -301,9 +331,7 @@ class ItemList(QDialog, ItemList_ui.Ui_dlg_ItemList):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
             if self.tw_steps.selectedItems():
-                if isinstance(self.entity, collections.Mapping) and self.entity[
-                    "type"
-                ] in ["asset", "shot", "sequence"]:
+                if self.entities:
                     if self.core.appPlugin.pluginName != "Standalone":
                         self.stepBbClicked(self.b_next)
                     else:

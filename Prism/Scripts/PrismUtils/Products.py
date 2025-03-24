@@ -37,6 +37,7 @@ import logging
 import shutil
 import platform
 import errno
+import copy
 
 from qtpy.QtCore import *
 from qtpy.QtGui import *
@@ -56,13 +57,18 @@ class Products(object):
     def getProductNamesFromEntity(self, entity, locations=None):
         data = self.getProductsFromEntity(entity, locations=locations)
         names = {}
+        useTasks = self.core.products.getLinkedToTasks()
         for product in data:
-            idf = product["product"]
-            if idf not in names:
-                names[idf] = product
-                names[idf]["locations"] = []
+            if useTasks:
+                idf = "%s/%s/%s" % (product.get("department", "unknown"), product.get("task", "unknown"), product["product"])
+            else:
+                idf = product["product"]
 
-            names[idf]["locations"].append(product["path"])
+            if idf not in names:
+                names[idf] = copy.deepcopy(product)
+                names[idf]["locations"] = {}
+
+            names[idf]["locations"].update(product["locations"])
 
         return names
 
@@ -80,17 +86,22 @@ class Products(object):
 
     @err_catcher(name=__name__)
     def getProductsFromEntity(self, entity, locations=None):
-        locationData = self.core.paths.getExportProductBasePaths()
-        searchLocations = []
-        for locData in locationData:
-            if not locations or locData in locations or "all" in locations:
-                searchLocations.append(locData)
+        if locations == "project_path":
+            searchLocations = ["other"]
+        else:
+            locationData = self.core.paths.getExportProductBasePaths()
+            searchLocations = []
+            for locData in locationData:
+                if not locations or locData in locations or "all" in locations:
+                    searchLocations.append(locData)
 
         key = "products"
         products = []
         for loc in searchLocations:
             context = entity.copy()
-            context["project_path"] = locationData[loc]
+            if locations != "project_path":
+                context["project_path"] = locationData[loc]
+
             template = self.core.projects.getResolvedProjectStructurePath(
                 key, context=context
             )
@@ -101,6 +112,7 @@ class Products(object):
 
                 d = context.copy()
                 d.update(data)
+                d["locations"] = {loc: data.get("path", "")}
                 products.append(d)
 
         return products
@@ -113,6 +125,9 @@ class Products(object):
 
     @err_catcher(name=__name__)
     def getLocationFromFilepath(self, path):
+        if not path:
+            return
+
         locDict = self.core.paths.getExportProductBasePaths()
         nPath = os.path.normpath(path)
         locations = []
@@ -149,11 +164,14 @@ class Products(object):
 
     @err_catcher(name=__name__)
     def getVersionsFromProduct(self, entity, product, locations="all"):
+        locations = locations or "all"
         if locations == "all":
-            locations = self.core.paths.getExportProductBasePaths()
+            locPaths = self.core.paths.getExportProductBasePaths()
+        elif locations == "project_path":
+            locPaths = {"_other": entity["project_path"]}
 
         versions = []
-        for loc in locations:
+        for loc in locPaths:
             context = entity.copy()
             if "version" in context:
                 del context["version"]
@@ -165,19 +183,17 @@ class Products(object):
                 del context["paths"]
 
             context["product"] = product
-            context["project_path"] = locations[loc]
-            locVersions = self.getVersionsFromContext(context, locations={loc: locations[loc]})
+            context["project_path"] = locPaths[loc]
+            locVersions = self.getVersionsFromContext(context, locations={loc: locPaths[loc]})
             for locVersion in locVersions:
                 locVersion["paths"] = [locVersion.get("path")]
                 for version in versions:
-                    if version.get("version") == locVersion.get("version"):
+                    if version.get("version") == locVersion.get("version") and version.get("wedge") == locVersion.get("wedge"):
                         version["paths"].append(locVersion.get("path"))
                         break
                 else:
                     versions.append(locVersion)
                     continue
-
-                break
 
         return versions
 
@@ -206,36 +222,43 @@ class Products(object):
     def getVersionsFromContext(self, context, locations=None):
         locationData = self.core.paths.getExportProductBasePaths()
         searchLocations = []
-        for locData in locationData:
-            if not locations or locData in locations or "all" in locations:
-                searchLocations.append(locData)
+        if locations and "_other" in locations:
+            searchLocations = locations
+        else:
+            for locData in locationData:
+                if not locations or locData in locations or "all" in locations:
+                    searchLocations.append(locData)
 
         key = "productVersions"
         versions = []
         for loc in searchLocations:
             ctx = context.copy()
-            ctx["project_path"] = locationData[loc]
-            template = self.core.projects.getResolvedProjectStructurePath(
+            if loc != "_other":
+                ctx["project_path"] = locationData[loc]
+
+            templates = self.core.projects.getResolvedProjectStructurePaths(
                 key, context=ctx
             )
+            versionData = []
+            for template in templates:
+                versionData += self.core.projects.getMatchingPaths(template)
 
-            versionData = self.core.projects.getMatchingPaths(template)
             for data in versionData:
-                c = ctx.copy()
+                c = copy.deepcopy(ctx)
                 c.update(data)
                 if self.getIntVersionFromVersionName(c["version"]) is None and c["version"] != "master":
                     continue
 
+                c["locations"] = {}
                 c["paths"] = [data.get("path")]
+                c["locations"][loc] = data.get("path", "")
                 if c["version"] and "_" in c["version"] and c["version"].count("_") == 1:
                     c["version"], c["wedge"] = c["version"].split("_")
 
-                if "locations" in c:
-                    c["locations"] = list(c["locations"])
-
                 for version in versions:
-                    if version.get("version") == c.get("version"):
+                    if version.get("version") == c.get("version") and version.get("wedge") == c.get("wedge"):
                         version["paths"].append(c.get("path"))
+                        version["locations"].update(c.get("locations"))
                         break
                 else:
                     versions.append(c)
@@ -403,14 +426,14 @@ class Products(object):
         return latestVersion
 
     @err_catcher(name=__name__)
-    def getLatestVersionpathFromProduct(self, product, entity=None, includeMaster=True, wedge=None):
+    def getLatestVersionpathFromProduct(self, product, entity=None, includeMaster=True, wedge=None, locations=None):
         if not entity:
             fname = self.core.getCurrentFileName()
             entity = self.core.getScenefileData(fname)
             if entity.get("type") not in ["asset", "shot"]:
                 return
 
-        versions = self.getVersionsFromProduct(entity, product)
+        versions = self.getVersionsFromProduct(entity, product, locations=locations)
         version = self.getLatestVersionFromVersions(
             versions, includeMaster=includeMaster, wedge=wedge
         )
@@ -530,14 +553,22 @@ class Products(object):
             callback()
 
     @err_catcher(name=__name__)
-    def getVersionpathFromProductVersion(self, product, version, entity=None, wedge=None):
+    def getLocationFromPath(self, path):
+        locDict = self.core.paths.getExportProductBasePaths()
+        nPath = os.path.normpath(path)
+        for location in locDict:
+            if nPath.startswith(locDict[location]):
+                return location
+
+    @err_catcher(name=__name__)
+    def getVersionpathFromProductVersion(self, product, version, entity=None, wedge=None, locations=None):
         if not entity:
             fname = self.core.getCurrentFileName()
             entity = self.core.getScenefileData(fname)
             if entity.get("type") not in ["asset", "shot"]:
                 return
 
-        versions = self.getVersionsFromProduct(entity, product)
+        versions = self.getVersionsFromProduct(entity, product, locations=locations)
         filepath = None
         for v in versions:
             if v["version"] == version:
@@ -822,6 +853,9 @@ class Products(object):
         context = self.getVersionStackContextFromPath(path)
         context["version"] = "master"
         key = "productVersions"
+        if "wedge" not in context:
+            context["wedge"] = ""
+
         masterFolder = self.core.projects.getResolvedProjectStructurePath(
             key, context=context
         )
@@ -854,8 +888,8 @@ class Products(object):
         return True
 
     @err_catcher(name=__name__)
-    def getMasterVersionNumber(self, masterPath):
-        versionData = self.core.paths.getCachePathData(masterPath, addPathData=False, validateModTime=True)
+    def getMasterVersionNumber(self, masterPath, allowCache=True):
+        versionData = self.core.paths.getCachePathData(masterPath, addPathData=False, validateModTime=True, allowCache=allowCache)
         if "sourceVersion" in versionData:
             return versionData["sourceVersion"]
 
@@ -874,9 +908,12 @@ class Products(object):
         return versionName
 
     @err_catcher(name=__name__)
-    def createProduct(self, entity, product):
+    def createProduct(self, entity, product, location="global"):
         context = entity.copy()
         context["product"] = product
+        basePath = self.core.paths.getExportProductBasePaths()[location]
+        context["project_path"] = basePath
+
         path = self.core.projects.getResolvedProjectStructurePath("products", context)
 
         if not os.path.exists(path):
@@ -920,12 +957,14 @@ class Products(object):
                         return filepath
 
     @err_catcher(name=__name__)
-    def ingestProductVersion(self, files, entity, product, comment=None):
+    def ingestProductVersion(self, files, entity, product, comment=None, version=None, location="global"):
         if comment is None:
             if len(files) > 1:
                 comment = "ingested files"
-            else:
+            elif files:
                 comment = "ingested file: %s" % os.path.basename(files[0])
+            else:
+                comment = ""
     
         kwargs = {
             "entity": entity,
@@ -933,22 +972,21 @@ class Products(object):
             "comment": comment,
             "user": self.core.user,
         }
+        basePath = self.core.paths.getExportProductBasePaths()[location]
+        kwargs["entity"]["project_path"] = basePath
+        if version is None:
+            version = self.getNextAvailableVersion(entity=entity, product=product)
 
-        version = self.getNextAvailableVersion(entity=entity, product=product)
         kwargs["version"] = version
         prefFile = self.getPreferredFileFromFiles(files, relative=True)
-        if not prefFile:
-            msg = "No file to ingest."
-            self.core.popup(msg)
-            return
-
         createdFiles = []
         targetPath = self.generateProductPath(**kwargs)
+        versionPath = os.path.dirname(targetPath)
         for file in files:
-            fileTargetPath = os.path.join(os.path.dirname(targetPath), os.path.basename(file))
-            if not os.path.exists(os.path.dirname(fileTargetPath)):
+            fileTargetPath = os.path.join(versionPath, os.path.basename(file))
+            if not os.path.exists(versionPath):
                 try:
-                    os.makedirs(os.path.dirname(fileTargetPath))
+                    os.makedirs(versionPath)
                 except:
                     self.core.popup("The directory could not be created")
                     return
@@ -982,19 +1020,24 @@ class Products(object):
         details["user"] = kwargs["user"]
         details["version"] = version
         details["comment"] = kwargs["comment"]
-        details["extension"] = os.path.splitext(prefFile)[1]
-        details["preferredFile"] = prefFile
+        if prefFile:
+            details["extension"] = os.path.splitext(prefFile)[1]
+            details["preferredFile"] = prefFile
 
         infoPath = self.getVersionInfoPathFromProductFilepath(targetPath)
         self.core.saveVersionInfo(filepath=infoPath, details=details)
 
-        return createdFiles
+        return {"createdFiles": createdFiles, "versionPath": versionPath}
 
     @err_catcher(name=__name__)
     def getUseMaster(self):
         return self.core.getConfig(
             "globals", "useMasterVersion", dft=True, config="project"
         )
+
+    @err_catcher(name=__name__)
+    def getLinkedToTasks(self):
+        return self.core.getConfig("globals", "productTasks", config="project")
 
     @err_catcher(name=__name__)
     def checkMasterVersions(self, entities, parent=None):

@@ -144,6 +144,11 @@ QMenuBar::item {
 }
 
 QMenuBar::item {
+    color: @white;
+    background-color: transparent;
+}
+
+QMenuBar::item {
     padding: 6px;
 }
 
@@ -556,7 +561,7 @@ QTabBar::tab {
 
 QTabBar::tab:top,
 QTabBar::tab:bottom {
-    min-width: 14ex;
+    min-width: 14px;
     min-height: 20px;
     padding: 0px 8px 0px 8px;
     margin: 0px 0px 10px 0px;
@@ -564,7 +569,7 @@ QTabBar::tab:bottom {
 
 QTabBar::tab:left,
 QTabBar::tab:right {
-    min-height: 14ex;
+    min-height: 14px;
     min-width: 20px;
     padding: 8px 0px 8px 0px;
 }

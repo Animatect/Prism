@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>340</width>
-    <height>955</height>
+    <width>400</width>
+    <height>1259</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -285,12 +285,6 @@
          </item>
          <item row="1" column="6">
           <widget class="QSpinBox" name="sp_rangeEnd">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>
@@ -301,12 +295,6 @@
          </item>
          <item row="0" column="6">
           <widget class="QSpinBox" name="sp_rangeStart">
-           <property name="maximumSize">
-            <size>
-             <width>55</width>
-             <height>16777215</height>
-            </size>
-           </property>
            <property name="maximum">
             <number>99999</number>
            </property>
@@ -1114,8 +1102,8 @@
              <rect>
               <x>0</x>
               <y>0</y>
-              <width>269</width>
-              <height>69</height>
+              <width>289</width>
+              <height>138</height>
              </rect>
             </property>
             <layout class="QHBoxLayout" name="horizontalLayout_12">

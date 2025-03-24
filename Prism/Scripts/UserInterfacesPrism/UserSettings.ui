@@ -39,7 +39,7 @@
         <rect>
          <x>0</x>
          <y>0</y>
-         <width>597</width>
+         <width>457</width>
          <height>739</height>
         </rect>
        </property>
@@ -62,7 +62,7 @@
         <item>
          <widget class="QTabWidget" name="tw_settings">
           <property name="currentIndex">
-           <number>0</number>
+           <number>5</number>
           </property>
           <widget class="QWidget" name="tabWidgetPage4">
            <attribute name="title">
@@ -805,13 +805,6 @@
                 </widget>
                </item>
                <item>
-                <widget class="QCheckBox" name="chb_highDPI">
-                 <property name="text">
-                  <string>HighDPI support (requires complete application restart) (experimental)</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
                 <widget class="QCheckBox" name="chb_errorReports">
                  <property name="text">
                   <string>Send anonymous error reports</string>
@@ -956,12 +949,6 @@
                   </item>
                   <item row="1" column="0">
                    <widget class="QLabel" name="label_12">
-                    <property name="font">
-                     <font>
-                      <weight>50</weight>
-                      <bold>false</bold>
-                     </font>
-                    </property>
                     <property name="text">
                      <string>Executable Path:</string>
                     </property>
@@ -975,22 +962,10 @@
                       <verstretch>0</verstretch>
                      </sizepolicy>
                     </property>
-                    <property name="font">
-                     <font>
-                      <weight>50</weight>
-                      <bold>false</bold>
-                     </font>
-                    </property>
                    </widget>
                   </item>
                   <item row="1" column="2">
                    <widget class="QPushButton" name="b_browseMediaPlayer">
-                    <property name="font">
-                     <font>
-                      <weight>50</weight>
-                      <bold>false</bold>
-                     </font>
-                    </property>
                     <property name="contextMenuPolicy">
                      <enum>Qt::CustomContextMenu</enum>
                     </property>

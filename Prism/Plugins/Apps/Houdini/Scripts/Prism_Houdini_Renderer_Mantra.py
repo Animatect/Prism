@@ -198,8 +198,8 @@ def executeAOVs(origin, outputName):
             return [origin.state.text(0) + ": error - Publish canceled"]
 
         deepPath = os.path.splitext(parmPath)[0]
-        if deepPath.endswith(".$F4"):
-            deepPath = deepPath[:-4] + "_deep" + ".$F4"
+        if deepPath.endswith((".$F" + str(origin.core.framePadding))):
+            deepPath = deepPath[:-origin.core.framePadding] + "_deep" + (".$F" + str(origin.core.framePadding))
         else:
             deepPath += "_deep"
 

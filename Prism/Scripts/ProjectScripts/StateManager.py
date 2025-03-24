@@ -131,6 +131,7 @@ class StateManager(QMainWindow, StateManager_ui.Ui_mw_StateManager):
         self.publishPaused = False
         self.entityDlg = EntityDlg
         self.applyChangesToSelection = True
+        self.collapsedFolders = []
 
         stateFiles = []
         pluginUiPath = os.path.join(
@@ -285,31 +286,64 @@ class %s(QWidget, %s.%s, %s.%sClass):
 
     @err_catcher(name=__name__)
     def loadLayout(self):
-        self.actionVersionUp = QAction("Version Up scenefile on publish", self)
+        self.actionSaveBeforePub = QAction("Save scenefile before publish", self)
+        self.actionSaveBeforePub.setCheckable(True)
+        self.actionSaveBeforePub.setChecked(self.core.getConfig("stateManager", "saveSceneBeforePublish", dft=True))
+        self.actionSaveBeforePub.toggled.connect(self.onSaveBeforePubToggled)
+        self.menuAbout.insertAction(self.actionCopyStates, self.actionSaveBeforePub)
+
+        self.actionVersionUp = QAction("Version Up scenefile before publish", self)
         self.actionVersionUp.setCheckable(True)
         self.actionVersionUp.setChecked(self.core.getConfig("stateManager", "versionUpSceneOnPublish", dft=True))
+        self.actionVersionUp.setEnabled(self.actionSaveBeforePub.isChecked())
         self.actionVersionUp.toggled.connect(self.onVersionUpToggled)
         self.menuAbout.insertAction(self.actionCopyStates, self.actionVersionUp)
+
+        self.actionSaveDuringPub = QAction("Save scenefile during publish", self)
+        self.actionSaveDuringPub.setCheckable(True)
+        self.actionSaveDuringPub.setChecked(self.core.getConfig("stateManager", "saveSceneDuringPublish", dft=True))
+        self.actionSaveDuringPub.toggled.connect(self.onSaveDuringPubToggled)
+        self.menuAbout.insertAction(self.actionCopyStates, self.actionSaveDuringPub)
+
         self.menuAbout.insertSeparator(self.actionCopyStates)
 
         helpMenu = QMenu("Help", self)
 
-        self.actionWebsite = QAction("Visit website", self)
+        self.actionWebsite = QAction(self.core.tr("Visit website"), self)
         self.actionWebsite.triggered.connect(lambda: self.core.openWebsite("home"))
+        path = os.path.join(self.core.prismRoot, "Scripts", "UserInterfacesPrism", "open-web.png")
+        icon = self.core.media.getColoredIcon(path)
+        self.actionWebsite.setIcon(icon)
         helpMenu.addAction(self.actionWebsite)
 
-        self.actionWebsite = QAction("Tutorials", self)
+        self.actionDiscord = QAction(self.core.tr("Discord"), self)
+        self.actionDiscord.triggered.connect(lambda: self.core.openWebsite("discord"))
+        path = os.path.join(self.core.prismRoot, "Scripts", "UserInterfacesPrism", "discord.png")
+        icon = self.core.media.getColoredIcon(path)
+        self.actionDiscord.setIcon(icon)
+        helpMenu.addAction(self.actionDiscord)
+
+        self.actionWebsite = QAction(self.core.tr("Tutorials"), self)
         self.actionWebsite.triggered.connect(lambda: self.core.openWebsite("tutorials"))
+        path = os.path.join(self.core.prismRoot, "Scripts", "UserInterfacesPrism", "tutorials.png")
+        icon = self.core.media.getColoredIcon(path)
+        self.actionWebsite.setIcon(icon)
         helpMenu.addAction(self.actionWebsite)
 
-        self.actionWebsite = QAction("Documentation", self)
+        self.actionWebsite = QAction(self.core.tr("Documentation"), self)
         self.actionWebsite.triggered.connect(
             lambda: self.core.openWebsite("documentation")
         )
+        path = os.path.join(self.core.prismRoot, "Scripts", "UserInterfacesPrism", "book.png")
+        icon = self.core.media.getColoredIcon(path)
+        self.actionWebsite.setIcon(icon)
         helpMenu.addAction(self.actionWebsite)
 
-        self.actionAbout = QAction("About...", self)
+        self.actionAbout = QAction(self.core.tr("About..."), self)
         self.actionAbout.triggered.connect(self.core.showAbout)
+        path = os.path.join(self.core.prismRoot, "Scripts", "UserInterfacesPrism", "info.png")
+        icon = self.core.media.getColoredIcon(path)
+        self.actionAbout.setIcon(icon)
         helpMenu.addAction(self.actionAbout)
 
         self.menubar.addMenu(helpMenu)
@@ -378,6 +412,15 @@ class %s(QWidget, %s.%s, %s.%sClass):
     @err_catcher(name=__name__)
     def onVersionUpToggled(self, state):
         self.core.setConfig("stateManager", "versionUpSceneOnPublish", val=state, config="user")
+
+    @err_catcher(name=__name__)
+    def onSaveBeforePubToggled(self, state):
+        self.core.setConfig("stateManager", "saveSceneBeforePublish", val=state, config="user")
+        self.actionVersionUp.setEnabled(state)
+
+    @err_catcher(name=__name__)
+    def onSaveDuringPubToggled(self, state):
+        self.core.setConfig("stateManager", "saveSceneDuringPublish", val=state, config="user")
 
     @err_catcher(name=__name__)
     def showRenderPresets(self):
@@ -1212,6 +1255,22 @@ QGroupBox::indicator:checked {
         self.saveStatesToScene()
 
     @err_catcher(name=__name__)
+    def requestImportPaths(self):
+        result = self.core.callback("requestImportPath", self)
+        for res in result:
+            if isinstance(res, dict) and res.get("importPaths") is not None:
+                return res["importPaths"]
+
+        import ProductBrowser
+
+        ts = ProductBrowser.ProductBrowser(core=self.core)
+        self.core.parentWindow(ts)
+        ts.exec_()
+
+        importPaths = [ts.productPath] if ts.productPath else []
+        return importPaths
+
+    @err_catcher(name=__name__)
     def createPressed(self, stateType, renderer=None):
         curSel = self.getCurrentItem(self.activeList)
         if stateType == "Import":
@@ -1230,30 +1289,28 @@ QGroupBox::indicator:checked {
             )
 
             if createEmptyState:
-                stateType = "ImportFile"
-                productPath = None
+                productPaths = [None]
             else:
-                import ProductBrowser
-
-                ts = ProductBrowser.ProductBrowser(core=self.core)
-                self.core.parentWindow(ts)
-                ts.exec_()
-
-                productPath = ts.productPath
-                if not productPath:
+                productPaths = self.requestImportPaths()
+                if not productPaths:
                     return
 
-                extension = os.path.splitext(productPath)[1]
-                stateType = (
-                    getattr(self.core.appPlugin, "sm_getImportHandlerType", lambda x: None)(
-                        extension
+            for productPath in productPaths:
+                if productPath:
+                    extension = os.path.splitext(productPath)[1]
+                    stateType = (
+                        getattr(self.core.appPlugin, "sm_getImportHandlerType", lambda x: None)(
+                            extension
+                        )
+                        or "ImportFile"
                     )
-                    or "ImportFile"
-                )
+                else:
+                    stateType = "ImportFile"
 
-            state = self.createState(stateType, parent=parent, importPath=productPath, setActive=True)
-            if not createEmptyState and ts.customProduct and state:
-                state.ui.e_name.setText(os.path.basename(productPath))
+                state = self.createState(stateType, parent=parent, importPath=productPath, setActive=True)
+                data = self.core.paths.getCachePathData(productPath)
+                if not createEmptyState and data.get("product") and state:
+                    state.ui.e_name.setText(os.path.basename(productPath))
 
             self.activateWindow()
 
@@ -1270,6 +1327,9 @@ QGroupBox::indicator:checked {
             exportStates = []
             appStates = getattr(self.core.appPlugin, "sm_createStatePressed", lambda x, y: [])(self, stateType)
             if not isinstance(appStates, list):
+                if appStates is None:
+                    return
+
                 self.createState(appStates["stateType"], parent=parent, setActive=True, **appStates.get("kwargs", {}))
                 return
 
@@ -1324,6 +1384,10 @@ QGroupBox::indicator:checked {
                 self.core.popup(msgStr)
                 self.saveEnabled = True
                 return False
+
+            if self.core.getConfig("globals", "productTasks", config="project"):
+                fnameData["department"] = os.getenv("PRISM_SHOTCAM_DEPARTMENT", "Layout")
+                fnameData["task"] = os.getenv("PRISM_SHOTCAM_TASK", "Cameras")
 
             filepath = self.core.products.getLatestVersionpathFromProduct(
                 "_ShotCam", entity=fnameData
@@ -1870,6 +1934,9 @@ QGroupBox::indicator:checked {
                     "username": self.core.getConfig("globals", "username"),
                 }
 
+            if saveScene is None:
+                saveScene = self.actionSaveBeforePub.isChecked()
+
             if saveScene is None or saveScene is True:
                 if executeState:
                     increment = False if incrementScene is None else incrementScene
@@ -1917,6 +1984,7 @@ QGroupBox::indicator:checked {
                     text = 'Executing "%s" - please wait..' % curUi.state.text(0)
                     self.pubMsg = self.core.waitPopup(self.core, text)
                     with self.pubMsg:
+                        QApplication.processEvents()
                         self.curExecutedState = curUi
                         if getattr(curUi, "canSetVersion", False):
                             result = curUi.executeState(
@@ -1950,6 +2018,7 @@ QGroupBox::indicator:checked {
                     text = 'Executing "%s" - please wait..' % curUi.state.text(0)
                     self.pubMsg = self.core.waitPopup(self.core, text)
                     with self.pubMsg:
+                        QApplication.processEvents()
                         self.curExecutedState = curUi
                         exResult = curUi.executeState(parent=self)
                         self.curExecutedState = None
@@ -1998,7 +2067,14 @@ QGroupBox::indicator:checked {
                 result = True
 
             if successPopup:
-                self.core.popup(msgStr, title=actionString, severity="info", parent=self)
+                if len(self.publishResult) == 1 and hasattr(self.publishResult[0]["state"], "showLastPathMenu"):
+                    buttons = ["Output Options...", "OK"]
+                    msg = self.core.popupQuestion(msgStr, title=actionString, buttons=buttons, icon=QMessageBox.Information, parent=self, doExec=False)
+                    msg.buttons()[0].clicked.disconnect()
+                    msg.buttons()[0].clicked.connect(lambda x=None, m=msg: self.onOutputOptionsClicked(m))
+                    msg.exec_()
+                else:
+                    self.core.popup(msgStr, title=actionString, severity="info", parent=self)
         else:
             infoString = ""
             for i in self.publishResult:
@@ -2019,6 +2095,12 @@ QGroupBox::indicator:checked {
         return result
 
     @err_catcher(name=__name__)
+    def onOutputOptionsClicked(self, msg):
+        msg.close()
+        msg.deleteLater()
+        self.publishResult[0]["state"].showLastPathMenu()
+
+    @err_catcher(name=__name__)
     def runSantityChecks(self, executeState):
         result = []
         extResult = getattr(self.core.appPlugin, "sm_getExternalFiles", lambda x: None)(self)
@@ -2034,7 +2116,7 @@ QGroupBox::indicator:checked {
             i = self.core.fixPath(i)
 
             if not (
-                i.startswith(self.core.projectPath)
+                i.lower().startswith(self.core.projectPath.lower())
                 or (
                     self.core.useLocalFiles and i.startswith(self.core.localProjectPath)
                 )
@@ -2246,6 +2328,9 @@ QGroupBox::indicator:checked {
 
 * Multiple elements can be combined by a "," in any order.
     Example: "34, 5-10x2, 3, 150-200, 60" will render frames 34, 5, 7, 9, 3, 150, 151 ... 200, 60
+
+* Frames can be exluded by starting an element with "^".
+    Example: "1-10, ^5-7" will render frames 1, 2, 3, 4, 8, 9, 10
 
 Each framenumber will be evaluated not more than once. Specifying a frame multiple times in an expression like "2, 3, 3, 4" will render frame 3 only once.
 

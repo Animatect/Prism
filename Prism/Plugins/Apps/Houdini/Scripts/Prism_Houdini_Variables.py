@@ -37,7 +37,7 @@ import os
 
 class Prism_Houdini_Variables(object):
     def __init__(self, core, plugin):
-        self.version = "v2.0.0"
+        self.version = "v2.0.10"
         self.pluginName = "Houdini"
         self.pluginType = "App"
         self.appShortName = "Hou"
@@ -49,6 +49,8 @@ class Prism_Houdini_Variables(object):
             ".bgeo",
             ".vdb",
             ".abc",
+            ".usda",
+            ".usdc",
             ".fbx",
             ".obj",
             "ShotCam",

@@ -112,18 +112,7 @@ class PlayblastClass(object):
         if stateData is not None:
             self.loadData(stateData)
         else:
-            context = self.getCurrentContext()
-            if context.get("type") == "asset":
-                self.setRangeType("Single Frame")
-            elif context.get("type") == "shot":
-                self.setRangeType("Shot")
-            elif self.stateManager.standalone:
-                self.setRangeType("Custom")
-            else:
-                self.setRangeType("Scene")
-
-            if context.get("task"):
-                self.setTaskname(context.get("task"))
+            self.initializeContextBasedSettings()
 
     @err_catcher(name=__name__)
     def loadData(self, data):
@@ -191,14 +180,10 @@ class PlayblastClass(object):
             self.l_pathLast.setText(lePath)
             self.l_pathLast.setToolTip(lePath)
         if "stateenabled" in data:
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         getattr(self.core.appPlugin, "sm_playblast_loadData", lambda x, y: None)(
             self, data
@@ -219,7 +204,7 @@ class PlayblastClass(object):
         self.sp_resHeight.editingFinished.connect(self.stateManager.saveStatesToScene)
         self.b_resPresets.clicked.connect(self.showResPresets)
         self.cb_master.activated.connect(self.stateManager.saveStatesToScene)
-        self.cb_location.activated[str].connect(self.stateManager.saveStatesToScene)
+        self.cb_location.activated.connect(self.stateManager.saveStatesToScene)
         self.cb_formats.activated.connect(self.stateManager.saveStatesToScene)
         self.gb_submit.toggled.connect(self.rjToggled)
         self.cb_manager.activated.connect(self.managerChanged)
@@ -233,6 +218,21 @@ class PlayblastClass(object):
             self.stateManager.saveStatesToScene
         )
         self.b_pathLast.clicked.connect(self.showLastPathMenu)
+
+    @err_catcher(name=__name__)
+    def initializeContextBasedSettings(self):
+        context = self.getCurrentContext()
+        if context.get("type") == "asset":
+            self.setRangeType("Single Frame")
+        elif context.get("type") == "shot":
+            self.setRangeType("Shot")
+        elif self.stateManager.standalone:
+            self.setRangeType("Custom")
+        else:
+            self.setRangeType("Scene")
+
+        if context.get("task"):
+            self.setTaskname(context.get("task"))
 
     @err_catcher(name=__name__)
     def showLastPathMenu(self):
@@ -727,7 +727,8 @@ class PlayblastClass(object):
         self.updateLastPath(outputName)
         self.stateManager.saveStatesToScene()
 
-        self.core.saveScene(versionUp=False, prismReq=False)
+        if self.stateManager.actionSaveDuringPub.isChecked():
+            self.core.saveScene(versionUp=False, prismReq=False)
 
         try:
             if not self.gb_submit.isHidden() and self.gb_submit.isChecked():
@@ -903,7 +904,7 @@ class PlayblastClass(object):
                 "rjsuspended": str(self.chb_rjSuspended.isChecked()),
                 "dlconcurrent": self.sp_dlConcurrentTasks.value(),
                 "lastexportpath": self.l_pathLast.text().replace("\\", "/"),
-                "stateenabled": str(self.state.checkState(0)),
+                "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
                 "outputformat": str(self.cb_formats.currentText()),
             }
         )

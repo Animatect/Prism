@@ -58,6 +58,15 @@ class Prism_Maya_externalAccess_Functions(object):
             plugin=self.plugin,
         )
         self.core.registerCallback("getPresetScenes", self.getPresetScenes, plugin=self.plugin)
+        self.core.registerCallback(
+            "preProjectSettingsLoad", self.preProjectSettingsLoad, plugin=self.plugin
+        )
+        self.core.registerCallback(
+            "preProjectSettingsSave", self.preProjectSettingsSave, plugin=self.plugin
+        )
+        self.core.registerCallback(
+            "projectSettings_loadUI", self.projectSettings_loadUI, plugin=self.plugin
+        )
 
     @err_catcher(name=__name__)
     def userSettings_loadUI(self, origin, tab):
@@ -199,3 +208,39 @@ class Prism_Maya_externalAccess_Functions(object):
         presetDir = os.path.join(self.pluginDirectory, "Presets")
         scenes = self.core.entities.getPresetScenesFromFolder(presetDir)
         presetScenes += scenes
+
+    @err_catcher(name=__name__)
+    def preProjectSettingsLoad(self, origin, settings):
+        if settings and "maya" in settings:
+            if "setPrefix" in settings["maya"]:
+                origin.e_mayaSetPrefix.setText(settings["maya"]["setPrefix"])
+
+    @err_catcher(name=__name__)
+    def preProjectSettingsSave(self, origin, settings):
+        if "maya" not in settings:
+            settings["maya"] = {}
+
+        prefix = origin.e_mayaSetPrefix.text()
+        settings["maya"]["setPrefix"] = prefix
+
+    @err_catcher(name=__name__)
+    def projectSettings_loadUI(self, origin):
+        self.addUiToProjectSettings(origin)
+
+    @err_catcher(name=__name__)
+    def addUiToProjectSettings(self, projectSettings):
+        projectSettings.w_maya = QGroupBox("Maya")
+        lo_maya = QGridLayout()
+        projectSettings.w_maya.setLayout(lo_maya)
+
+        ttip = "Prefix for all selection sets created by Prism in Maya."
+        l_relative = QLabel("Selection Set Prefix:")
+        l_relative.setToolTip(ttip)
+        projectSettings.e_mayaSetPrefix = QLineEdit()
+        projectSettings.e_mayaSetPrefix.setToolTip(ttip)
+
+        lo_maya.addWidget(l_relative, 0, 0)
+        sp_stretch = QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Preferred)
+        lo_maya.addItem(sp_stretch, 0, 1)
+        lo_maya.addWidget(projectSettings.e_mayaSetPrefix, 0, 2)
+        projectSettings.w_prjSettings.layout().addWidget(projectSettings.w_maya)

@@ -122,43 +122,7 @@ class ExportClass(object):
         if stateData is not None:
             self.loadData(stateData)
         else:
-            context = self.getCurrentContext()
-            if (
-                context.get("type") == "shot"
-                and "sequence" in context
-            ):
-                self.refreshShotCameras()
-                shotName = self.core.entities.getShotName(context)
-                idx = self.cb_sCamShot.findText(shotName)
-                if idx != -1:
-                    self.cb_sCamShot.setCurrentIndex(idx)
-
-            startFrame, endFrame = self.getFrameRange("Scene")
-            if startFrame is not None:
-                self.sp_rangeStart.setValue(startFrame)
-
-            if endFrame is not None:
-                self.sp_rangeEnd.setValue(endFrame)
-
-            if context.get("type") == "asset":
-                self.setRangeType("Single Frame")
-                self.sp_rangeEnd.setValue(startFrame)
-            elif context.get("type") == "shot":
-                self.setRangeType("Shot")
-            elif self.stateManager.standalone:
-                self.setRangeType("Custom")
-            else:
-                self.setRangeType("Scene")
-
-            if context.get("task"):
-                self.setTaskname(context.get("task"))
-
-            getattr(self.core.appPlugin, "sm_export_updateObjects", lambda x: None)(
-                self
-            )
-
-            if not self.stateManager.standalone:
-                self.addObjects()
+            self.initializeContextBasedSettings()
 
         self.typeChanged(self.getOutputType())
 
@@ -236,14 +200,10 @@ class ExportClass(object):
             lePath = self.core.fixPath(data["lastexportpath"])
             self.setLastPath(lePath)
         if "stateenabled" in data:
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         getattr(self.core.appPlugin, "sm_export_loadData", lambda x, y: None)(
             self, data
@@ -261,8 +221,8 @@ class ExportClass(object):
         self.sp_rangeStart.editingFinished.connect(self.startChanged)
         self.sp_rangeEnd.editingFinished.connect(self.endChanged)
         self.chb_master.stateChanged.connect(self.stateManager.saveStatesToScene)
-        self.cb_outPath.activated[str].connect(self.stateManager.saveStatesToScene)
-        self.cb_outType.activated[str].connect(self.typeChanged)
+        self.cb_outPath.activated.connect(self.stateManager.saveStatesToScene)
+        self.cb_outType.activated.connect(lambda x: self.typeChanged(self.getOutputType()))
         self.chb_wholeScene.stateChanged.connect(self.wholeSceneChanged)
         self.chb_additionalOptions.stateChanged.connect(
             self.stateManager.saveStatesToScene
@@ -288,6 +248,46 @@ class ExportClass(object):
         if not self.stateManager.standalone:
             self.b_add.clicked.connect(self.addObjects)
         self.b_pathLast.clicked.connect(self.showLastPathMenu)
+
+    @err_catcher(name=__name__)
+    def initializeContextBasedSettings(self):
+        context = self.getCurrentContext()
+        if (
+            context.get("type") == "shot"
+            and "sequence" in context
+        ):
+            self.refreshShotCameras()
+            shotName = self.core.entities.getShotName(context)
+            idx = self.cb_sCamShot.findText(shotName)
+            if idx != -1:
+                self.cb_sCamShot.setCurrentIndex(idx)
+
+        startFrame, endFrame = self.getFrameRange("Scene")
+        if startFrame is not None:
+            self.sp_rangeStart.setValue(startFrame)
+
+        if endFrame is not None:
+            self.sp_rangeEnd.setValue(endFrame)
+
+        if context.get("type") == "asset":
+            self.setRangeType("Single Frame")
+            self.sp_rangeEnd.setValue(startFrame)
+        elif context.get("type") == "shot":
+            self.setRangeType("Shot")
+        elif self.stateManager.standalone:
+            self.setRangeType("Custom")
+        else:
+            self.setRangeType("Scene")
+
+        if context.get("task"):
+            self.setTaskname(context.get("task"))
+
+        getattr(self.core.appPlugin, "sm_export_updateObjects", lambda x: None)(
+            self
+        )
+
+        if not self.stateManager.standalone:
+            self.addObjects()
 
     @err_catcher(name=__name__)
     def showLastPathMenu(self):
@@ -483,7 +483,7 @@ class ExportClass(object):
 
     @err_catcher(name=__name__)
     def preDelete(self, item):
-        self.core.appPlugin.sm_export_preDelete(self)
+        getattr(self.core.appPlugin, "sm_export_preDelete", lambda x: None)(self)
 
     @err_catcher(name=__name__)
     def rcObjects(self, pos):
@@ -494,7 +494,7 @@ class ExportClass(object):
 
         createMenu = QMenu()
 
-        if not item is None:
+        if item is not None:
             actRemove = QAction("Remove", self)
             actRemove.triggered.connect(lambda: self.removeItem(item))
             createMenu.addAction(actRemove)
@@ -519,7 +519,7 @@ class ExportClass(object):
         items = self.lw_objects.selectedItems()
         for item in reversed(items):
             rowNum = self.lw_objects.row(item)
-            self.core.appPlugin.sm_export_removeSetItem(self, self.nodes[rowNum])
+            getattr(self.core.appPlugin, "sm_export_removeSetItem", lambda x, y: None)(self, self.nodes[rowNum])
             del self.nodes[rowNum]
             self.lw_objects.takeItem(rowNum)
 
@@ -580,6 +580,7 @@ class ExportClass(object):
         self.updateRange()
         self.refreshShotCameras()
         self.updateObjectList()
+
         if self.getTaskname():
             self.b_changeTask.setPalette(self.oldPalette)
 
@@ -629,6 +630,10 @@ class ExportClass(object):
         if not context:
             if self.getOutputType() == "ShotCam":
                 context = self.cb_sCamShot.currentData()
+                if self.core.getConfig("globals", "productTasks", config="project"):
+                    context["department"] = os.getenv("PRISM_SHOTCAM_DEPARTMENT", "Layout")
+                    context["task"] = os.getenv("PRISM_SHOTCAM_TASK", "Cameras")
+
             else:
                 fileName = self.core.getCurrentFileName()
                 context = self.core.getScenefileData(fileName)
@@ -928,6 +933,7 @@ class ExportClass(object):
                 "startframe": startFrame,
                 "endframe": endFrame,
                 "outputpath": outputName,
+                "version": hVersion,
             }
 
             result = self.core.callback("preExport", **kwargs)
@@ -940,6 +946,9 @@ class ExportClass(object):
 
                 if res and "outputName" in res:
                     outputName = res["outputName"]
+
+                if res and "version" in res:
+                    hVersion = res["version"]
 
             outputPath = os.path.dirname(outputName)
             if not os.path.exists(outputPath):
@@ -1077,6 +1086,7 @@ class ExportClass(object):
             details["version"] = hVersion
             details["sourceScene"] = fileName
             details["product"] = self.getTaskname()
+            details["comment"] = self.stateManager.publishComment
 
             if startFrame != endFrame:
                 details["fps"] = self.core.getFPS()
@@ -1186,7 +1196,7 @@ class ExportClass(object):
                 "rjsuspended": str(self.chb_rjSuspended.isChecked()),
                 "dlconcurrent": self.sp_dlConcurrentTasks.value(),
                 "lastexportpath": self.l_pathLast.text().replace("\\", "/"),
-                "stateenabled": str(self.state.checkState(0)),
+                "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
             }
         )
         getattr(self.core.appPlugin, "sm_export_getStateProps", lambda x, y: None)(

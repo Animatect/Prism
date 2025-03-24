@@ -40,13 +40,9 @@ import platform
 import glob
 import logging
 
-try:
-    from PySide2.QtCore import *
-    from PySide2.QtGui import *
-    from PySide2.QtWidgets import *
-except:
-    from PySide.QtCore import *
-    from PySide.QtGui import *
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 
 import hou
 
@@ -177,14 +173,10 @@ class PlayblastClass(object):
             self.l_pathLast.setText(lePath)
             self.l_pathLast.setToolTip(lePath)
         if "stateenabled" in data:
-            self.state.setCheckState(
-                0,
-                eval(
-                    data["stateenabled"]
-                    .replace("PySide.QtCore.", "")
-                    .replace("PySide2.QtCore.", "")
-                ),
-            )
+            if type(data["stateenabled"]) == int:
+                self.state.setCheckState(
+                    0, Qt.CheckState(data["stateenabled"]),
+                )
 
         self.core.callback("onStateSettingsLoaded", self, data)
 
@@ -202,7 +194,7 @@ class PlayblastClass(object):
         self.sp_resHeight.editingFinished.connect(self.stateManager.saveStatesToScene)
         self.b_resPresets.clicked.connect(self.showResPresets)
         self.cb_master.activated.connect(self.stateManager.saveStatesToScene)
-        self.cb_location.activated[str].connect(self.stateManager.saveStatesToScene)
+        self.cb_location.activated.connect(self.stateManager.saveStatesToScene)
         self.cb_formats.activated.connect(self.stateManager.saveStatesToScene)
         self.b_pathLast.clicked.connect(self.showLastPathMenu)
 
@@ -598,7 +590,7 @@ class PlayblastClass(object):
         entity = self.getOutputEntity()
         comment = self.stateManager.publishComment
         framePadding = (
-            "$F4" if self.cb_rangeType.currentText() != "Single Frame" else ""
+            ("$F" + str(self.core.framePadding)) if self.cb_rangeType.currentText() != "Single Frame" else ""
         )
 
         if "type" not in entity:
@@ -699,7 +691,8 @@ class PlayblastClass(object):
         self.updateLastPath(outputName)
         self.stateManager.saveStatesToScene()
 
-        hou.hipFile.save()
+        if self.stateManager.actionSaveDuringPub.isChecked():
+            hou.hipFile.save()
 
         kwargs = {
             "state": self,
@@ -987,7 +980,7 @@ class PlayblastClass(object):
             "location": self.cb_location.currentText(),
             "outputformat": str(self.cb_formats.currentText()),
             "lastexportpath": self.l_pathLast.text().replace("\\", "/"),
-            "stateenabled": str(self.state.checkState(0)),
+            "stateenabled": self.core.getCheckStateValue(self.state.checkState(0)),
         }
         self.core.callback("onStateGetSettings", self, stateProps)
         return stateProps

@@ -295,6 +295,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
                         "badd": b_addInteg,
                         "bremove": b_removeInteg,
                         "lexample": l_examplePath,
+                        "tab": tab,
                     }
 
                 getattr(
@@ -311,7 +312,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
 
         self.tab_dccApps.layout().addStretch()
 
-        headerLabels = ["Loaded", "Auto load", "Name", "Type", "Version", "Location"]
+        headerLabels = ["Loaded", "Auto Load", "Name", "Type", "Version", "Location"]
         self.tw_plugins.setColumnCount(len(headerLabels))
         self.tw_plugins.setHorizontalHeaderLabels(headerLabels)
         self.tw_plugins.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
@@ -677,6 +678,8 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
         act_unload = rcmenu.addAction(
             "Unload", lambda: self.loadPlugins(selected=True, unload=True)
         )
+        act_autoload = rcmenu.addAction("Auto Load")
+        act_autoload.setCheckable(True)
         act_open = rcmenu.addAction("Open in explorer", self.openPluginFolder)
 
         if len(selPlugs) == 0:
@@ -687,9 +690,24 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
             else:
                 act_reload.setEnabled(False)
                 act_unload.setEnabled(False)
+
+            if self.tw_plugins.cellWidget(selPlugs[0], 1).isChecked():
+                act_autoload.setChecked(True)
+            else:
+                act_autoload.setChecked(False)
+
         elif len(selPlugs) > 1:
             act_open.setEnabled(False)
 
+            isAutoLoad = False
+            for selPlug in selPlugs:
+                if self.tw_plugins.cellWidget(selPlug, 1).isChecked():
+                    isAutoLoad = True
+                    break
+
+            act_autoload.setChecked(isAutoLoad)
+
+        act_autoload.toggled.connect(lambda x: self.setAutoLoadPlugins(selected=True, state=x))
         rcmenu.exec_(QCursor.pos())
 
     @err_catcher(name=__name__)
@@ -831,7 +849,6 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
         cData["globals"]["useMediaThumbnails"] = self.chb_mediaThumbnails.isChecked()
         cData["globals"]["autosave"] = self.chb_autosave.isChecked()
         cData["globals"]["capture_viewport"] = self.chb_captureViewport.isChecked()
-        cData["globals"]["highdpi"] = self.chb_highDPI.isChecked()
         cData["globals"]["send_error_reports"] = self.chb_errorReports.isChecked()
         cData["globals"]["debug_mode"] = self.chb_debug.isChecked()
         cData["globals"]["standalone_stylesheet"] = self.cb_styleSheet.currentData().get("name", "")
@@ -899,7 +916,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
 
         if platform.system() == "Windows":
             trayStartupPath = os.path.join(
-                os.getenv("APPDATA"),
+                os.getenv("PROGRAMDATA"),
                 "Microsoft",
                 "Windows",
                 "Start Menu",
@@ -907,6 +924,16 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
                 "Startup",
                 "Prism.lnk",
             )
+            if not os.path.exists(trayStartupPath):
+                trayStartupPath = os.path.join(
+                    os.getenv("APPDATA"),
+                    "Microsoft",
+                    "Windows",
+                    "Start Menu",
+                    "Programs",
+                    "Startup",
+                    "Prism.lnk",
+                )
         elif platform.system() == "Linux":
             trayStartupPath = "/etc/xdg/autostart/PrismTray.desktop"
         elif platform.system() == "Darwin":
@@ -960,9 +987,6 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
 
             if "capture_viewport" in gblData:
                 self.chb_captureViewport.setChecked(gblData["capture_viewport"])
-
-            if "highdpi" in gblData:
-                self.chb_highDPI.setChecked(gblData["highdpi"])
 
             if "send_error_reports" in gblData:
                 self.chb_errorReports.setChecked(gblData["send_error_reports"])
@@ -1221,12 +1245,32 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
             self.core.ps.raise_()
 
     @err_catcher(name=__name__)
+    def setAutoLoadPlugins(self, plugins=None, selected=False, state=False):
+        if plugins is None and selected:
+            plugins = []
+            for i in self.tw_plugins.selectedItems():
+                if i.column() != 0:
+                    continue
+
+                pluginPath = i.data(Qt.UserRole)
+                if pluginPath:
+                    name = self.tw_plugins.item(i.row(), 2).text()
+                    plugins.append({"path": pluginPath, "name": name, "row": i.row()})
+
+        if not plugins:
+            return
+
+        for plugin in plugins:
+            self.tw_plugins.cellWidget(plugin["row"], 1).setChecked(state)
+            self.core.plugins.setAutoLoadPlugin(plugin["name"], state)
+
+    @err_catcher(name=__name__)
     def managePluginsDlg(self, state=None):
         self.dlg_managePluginPaths = ManagePluginPaths(self)
         self.dlg_managePluginPaths.show()        
 
     @err_catcher(name=__name__)
-    def loadExternalPlugin(self):
+    def loadExternalPlugin(self, state=None):
         startPath = getattr(
             self, "externalPluginStartPath", None
         ) or self.core.plugins.getPluginPath(location="root")
@@ -1237,11 +1281,10 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
         if not selectedPath:
             return
 
-        result = self.core.plugins.loadPlugin(selectedPath, activate=True)
+        result = self.core.plugins.loadPlugin(selectedPath, activate=True, showWarnings=True)
         selectedParent = os.path.dirname(selectedPath)
         if not result:
             self.externalPluginStartPath = selectedParent
-            self.core.popup("Couldn't load plugin")
             return
 
         self.core.plugins.addToPluginConfig(selectedPath)
@@ -1324,7 +1367,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
             return
 
         self.core.plugins.loadPlugin(pluginPath)
-        if pluginType == "Custom":
+        if pluginType in ["Custom", "Single File"]:
             self.core.plugins.addToPluginConfig(pluginPath)
 
         ps = self.core.ps  # keep the Settings Window in memory to avoid crash
@@ -1476,7 +1519,7 @@ class CreatePluginDialog(QDialog):
         self.lo_type = QHBoxLayout()
         self.l_type = QLabel("Type:")
         self.cb_type = QComboBox()
-        self.cb_type.addItems(["App", "Custom"])
+        self.cb_type.addItems(["App", "Custom", "Single File"])
         self.cb_type.setCurrentIndex(1)
         self.lo_type.addWidget(self.l_type)
         self.lo_type.addWidget(self.cb_type)
@@ -1522,14 +1565,14 @@ class CreatePluginDialog(QDialog):
         self.e_path.textChanged.connect(lambda x: self.validate(self.e_path, x))
         self.cb_type.activated.connect(lambda x: self.refreshPath())
         self.cb_location.activated.connect(lambda x: self.refreshPath())
-        self.cb_location.activated[str].connect(
-            lambda x: self.l_path.setVisible(x != "Custom")
+        self.cb_location.activated.connect(
+            lambda x: self.l_path.setVisible(self.cb_location.currentText() != "Custom")
         )
-        self.cb_location.activated[str].connect(
-            lambda x: self.e_path.setVisible(x == "Custom")
+        self.cb_location.activated.connect(
+            lambda x: self.e_path.setVisible(self.cb_location.currentText() == "Custom")
         )
-        self.cb_location.activated[str].connect(
-            lambda x: self.b_browse.setVisible(x == "Custom")
+        self.cb_location.activated.connect(
+            lambda x: self.b_browse.setVisible(self.cb_location.currentText() == "Custom")
         )
         self.b_browse.clicked.connect(self.browse)
         self.b_browse.customContextMenuRequested.connect(
@@ -1935,12 +1978,13 @@ class ManagePluginPaths(QDialog):
             self.core.prismSettings(restart=True, reload_module=False)
 
         QApplication.processEvents()
-        self.core.ps.externalPluginStartPath = selectedParent
-        self.core.ps.navigate({"tab": "Plugins", "settingsType": "User"})
-        self.core.ps.activateWindow()
-        self.core.ps.raise_()
-        self.core.ps.w_user.managePluginsDlg()
-        self.close()
+        if self.core.ps:
+            self.core.ps.externalPluginStartPath = selectedParent
+            self.core.ps.navigate({"tab": "Plugins", "settingsType": "User"})
+            self.core.ps.activateWindow()
+            self.core.ps.raise_()
+            self.core.ps.w_user.managePluginsDlg()
+            self.close()
 
     @err_catcher(name=__name__)
     def removePluginPaths(self):

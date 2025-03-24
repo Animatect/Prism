@@ -35,13 +35,9 @@
 import os
 import logging
 
-try:
-    from PySide2.QtCore import *
-    from PySide2.QtGui import *
-    from PySide2.QtWidgets import *
-except:
-    from PySide.QtCore import *
-    from PySide.QtGui import *
+from qtpy.QtCore import *
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
 
 import hou
 
@@ -75,9 +71,8 @@ class ImportFileClass(object):
         self.stateNameTemplate = self.core.getConfig(
             "globals",
             "defaultImportStateName",
-            dft=stateNameTemplate,
             configPath=self.core.prismIni,
-        )
+        ) or stateNameTemplate
         self.e_name.setText(self.stateNameTemplate)
         self.l_name.setVisible(False)
         self.e_name.setVisible(False)
@@ -110,15 +105,12 @@ class ImportFileClass(object):
             and not createEmptyState
             and not self.stateManager.standalone
         ):
-            import ProductBrowser
-
-            ts = ProductBrowser.ProductBrowser(core=core, importState=self)
-            self.core.parentWindow(ts)
-            if self.core.uiScaleFactor != 1:
-                self.core.scaleUI(self.state, sFactor=0.5)
-            ts.exec_()
-
-            importPath = ts.productPath
+            importPaths = self.requestImportPaths()
+            if importPaths:
+                importPath = importPaths[-1]
+                if len(importPaths) > 1:
+                    for importPath in importPaths[:-1]:
+                        stateManager.importFile(importPath)
 
         if importPath:
             self.setImportPath(importPath)
@@ -168,6 +160,24 @@ class ImportFileClass(object):
             self.chb_autoUpdate.setChecked(eval(data["autoUpdate"]))
 
         self.core.callback("onStateSettingsLoaded", self, data)
+
+    @err_catcher(name=__name__)
+    def requestImportPaths(self):
+        result = self.core.callback("requestImportPath", self)
+        for res in result:
+            if isinstance(res, dict) and res.get("importPaths") is not None:
+                return res["importPaths"]
+
+        import ProductBrowser
+
+        ts = ProductBrowser.ProductBrowser(core=self.core, importState=self)
+        self.core.parentWindow(ts)
+        if self.core.uiScaleFactor != 1:
+            self.core.scaleUI(self.state, sFactor=0.5)
+        ts.exec_()
+
+        importPaths = [ts.productPath]
+        return importPaths
 
     @err_catcher(name=__name__)
     def findNode(self, path):
