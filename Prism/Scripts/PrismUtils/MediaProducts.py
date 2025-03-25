@@ -242,7 +242,7 @@ class MediaProducts(object):
 
     @err_catcher(name=__name__)
     def getVersionStackContextFromPath(self, filepath, mediaType=None):
-        context = self.core.paths.getRenderProductData(filepath)
+        context = self.core.paths.getRenderProductData(filepath, mediaType=mediaType)
 
         if mediaType:
             context["mediaType"] = mediaType
@@ -293,9 +293,9 @@ class MediaProducts(object):
                 versionData += self.core.projects.getMatchingPaths(template)
 
             for data in versionData:
-                c = copy.deepcopy(context)
+                c = self.getDeepCopy(context)
                 c.update(data)
-                if self.core.products.getIntVersionFromVersionName(c["version"]) is None and c["version"] != "master":
+                if self.core.products.getIntVersionFromVersionName(c["version"]) is None and c["version"] != "master" and os.getenv("PRISM_SHOW_INVALID_VERSION_NAMES", "0") == "0":
                     continue
 
                 c["paths"] = [data.get("path")]
@@ -311,6 +311,32 @@ class MediaProducts(object):
                     continue
 
         return versions
+
+    @err_catcher(name=__name__)
+    def isPicklable(self, value):
+        import pickle
+        try:
+            pickle.dumps(value)
+            return True
+        except (pickle.PicklingError, TypeError):
+            return False
+
+    @err_catcher(name=__name__)
+    def getDeepCopy(self, context):
+        if not isinstance(context, dict):
+            return context
+
+        try:
+            newDict = copy.deepcopy(context)
+        except:
+            newDict = {}
+            for key, value in context.items():
+                if self.isPicklable(value):
+                    newDict[key] = self.getDeepCopy(value)
+                else:
+                    print(f"Warning: Ignoring unpicklable value for key '{key}'")
+
+        return newDict
 
     @err_catcher(name=__name__)
     def getAovPathFromVersion(self, version):
@@ -425,6 +451,7 @@ class MediaProducts(object):
                 globPath = os.path.join(folder, context["source"].replace("#", "?"))
                 files = glob.glob(globPath)
             else:
+                files = []
                 for root, folders, files in os.walk(folder):
                     break
 
@@ -612,6 +639,7 @@ class MediaProducts(object):
     ):
         framePadding = framePadding or ""
         comment = comment or ""
+        location = location or "global"
 
         versionUser = user or self.core.user
         basePath = self.core.paths.getRenderProductBasePaths()[location]
@@ -851,7 +879,8 @@ class MediaProducts(object):
         key = "renderVersions"
 
         location = self.getLocationFromPath(versionFolder)
-        context["project_path"] = self.core.paths.getRenderProductBasePaths()[location]
+        if location:
+            context["project_path"] = self.core.paths.getRenderProductBasePaths()[location]
 
         if "type" in context and "entityType" not in context:
             context["entityType"] = context["type"]
@@ -939,14 +968,23 @@ class MediaProducts(object):
     def getLocationFromPath(self, path):
         locDict = self.core.paths.getRenderProductBasePaths()
         nPath = os.path.normpath(path)
+        validLocs = []
         for location in locDict:
             if nPath.startswith(locDict[location]):
-                return location
+                validLocs.append(location)
+
+        validLocs = sorted(validLocs, key=lambda x: len(locDict[x]), reverse=True)
+        return validLocs[0]
 
     @err_catcher(name=__name__)
-    def getVersionPathFromMediaFilePath(self, path, mediaType):
-        entityType = self.core.paths.getEntityTypeFromPath(path)
+    def getVersionPathFromMediaFilePath(self, path, mediaType, entityType=None):
+        if not entityType:
+            entityType = self.core.paths.getEntityTypeFromPath(path)
+            if not entityType:
+                context = self.core.paths.getMediaProductData(path, mediaType=mediaType)
+                entityType = context.get("type")
 
+        key = None
         context = {"mediaType": mediaType}
         if mediaType == "playblasts":
             versionKey = "playblastVersions"
@@ -960,6 +998,9 @@ class MediaProducts(object):
                 key = "renderFilesAssets"
             elif entityType == "shot":
                 key = "renderFilesShots"
+
+        if not key:
+            return
 
         location = self.getLocationFromPath(path)
         context["project_path"] = self.core.paths.getRenderProductBasePaths()[location]
@@ -1035,9 +1076,9 @@ class MediaProducts(object):
         masterDrive = os.path.splitdrive(masterPath)[0]
         drive = os.path.splitdrive(path)[0]
 
-        masterBase = self.getVersionPathFromMediaFilePath(masterPath, mediaType=context.get("mediaType"))
+        masterBase = self.getVersionPathFromMediaFilePath(masterPath, mediaType=context.get("mediaType"), entityType=context.get("type"))
         if isFilepath:
-            originBase = self.getVersionPathFromMediaFilePath(path, mediaType=context.get("mediaType"))
+            originBase = self.getVersionPathFromMediaFilePath(path, mediaType=context.get("mediaType"), entityType=context.get("type"))
         else:
             originBase = path
 
@@ -1197,7 +1238,7 @@ class MediaProducts(object):
             vpath = path
 
         logger.debug("removing master render version: %s" % vpath)
-        if os.path.exists(vpath):
+        if vpath and os.path.exists(vpath):
             try:
                 shutil.rmtree(vpath)
             except Exception as e:

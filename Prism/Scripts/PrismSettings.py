@@ -240,7 +240,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
 
                 if self.core.getPluginData(i, "canOverrideExecuteable") is not False:
                     l_ovr = QLabel(
-                        "By default Prism uses the default application configured in Windows to open scenefiles.\nThe following setting let you override this behaviour by defining explicit applications for opening scenefiles."
+                        "By default Prism uses the default application configured in the OS settings to open scenefiles.\nThe following setting let you override this behaviour by defining explicit applications for opening scenefiles."
                     )
                     chb_ovr = QCheckBox("Executable override")
                     le_ovr = QLineEdit()

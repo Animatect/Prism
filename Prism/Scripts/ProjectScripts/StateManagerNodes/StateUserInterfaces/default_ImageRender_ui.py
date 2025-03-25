@@ -16,7 +16,7 @@ class Ui_wg_ImageRender(object):
     def setupUi(self, wg_ImageRender):
         if not wg_ImageRender.objectName():
             wg_ImageRender.setObjectName(u"wg_ImageRender")
-        wg_ImageRender.resize(400, 1484)
+        wg_ImageRender.resize(400, 1319)
         self.verticalLayout = QVBoxLayout(wg_ImageRender)
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.verticalLayout.setContentsMargins(0, 0, 0, 0)
@@ -415,6 +415,47 @@ class Ui_wg_ImageRender(object):
 
         self.verticalLayout_2.addWidget(self.w_format)
 
+        self.w_version = QWidget(self.gb_imageRender)
+        self.w_version.setObjectName(u"w_version")
+        self.horizontalLayout_12 = QHBoxLayout(self.w_version)
+        self.horizontalLayout_12.setSpacing(6)
+        self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
+        self.horizontalLayout_12.setContentsMargins(9, 0, 9, 0)
+        self.label_8 = QLabel(self.w_version)
+        self.label_8.setObjectName(u"label_8")
+        self.label_8.setEnabled(True)
+
+        self.horizontalLayout_12.addWidget(self.label_8)
+
+        self.horizontalSpacer_10 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_12.addItem(self.horizontalSpacer_10)
+
+        self.chb_version = QCheckBox(self.w_version)
+        self.chb_version.setObjectName(u"chb_version")
+
+        self.horizontalLayout_12.addWidget(self.chb_version)
+
+        self.sp_version = QSpinBox(self.w_version)
+        self.sp_version.setObjectName(u"sp_version")
+        self.sp_version.setEnabled(False)
+        self.sp_version.setMinimum(1)
+        self.sp_version.setMaximum(99999)
+
+        self.horizontalLayout_12.addWidget(self.sp_version)
+
+        self.b_version = QPushButton(self.w_version)
+        self.b_version.setObjectName(u"b_version")
+        self.b_version.setEnabled(False)
+        self.b_version.setMinimumSize(QSize(23, 23))
+        self.b_version.setMaximumSize(QSize(23, 23))
+        self.b_version.setFocusPolicy(Qt.NoFocus)
+
+        self.horizontalLayout_12.addWidget(self.b_version)
+
+
+        self.verticalLayout_2.addWidget(self.w_version)
+
 
         self.verticalLayout.addWidget(self.gb_imageRender)
 
@@ -744,7 +785,7 @@ class Ui_wg_ImageRender(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 327, 138))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 349, 214))
         self.verticalLayout_3 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.l_pathLast = QLabel(self.scrollAreaWidgetContents)
@@ -832,6 +873,9 @@ class Ui_wg_ImageRender(object):
         self.l_outPath.setText(QCoreApplication.translate("wg_ImageRender", u"Location:", None))
         self.label_5.setText(QCoreApplication.translate("wg_ImageRender", u"Render layer:", None))
         self.label_6.setText(QCoreApplication.translate("wg_ImageRender", u"Format:", None))
+        self.label_8.setText(QCoreApplication.translate("wg_ImageRender", u"Version override:", None))
+        self.chb_version.setText("")
+        self.b_version.setText(QCoreApplication.translate("wg_ImageRender", u"\u25bc", None))
         self.gb_submit.setTitle(QCoreApplication.translate("wg_ImageRender", u"Submit Render Job", None))
         self.l_manager.setText(QCoreApplication.translate("wg_ImageRender", u"Manager:", None))
         self.l_rjPrio.setText(QCoreApplication.translate("wg_ImageRender", u"Priority:", None))

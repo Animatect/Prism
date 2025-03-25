@@ -119,7 +119,7 @@ class CreateItem(QDialog, CreateItem_ui.Ui_dlg_CreateItem):
         if self.mode in ["assetHierarchy"] or allowNext:
             self.b_next = self.buttonBox.addButton(self.btext, QDialogButtonBox.AcceptRole)
             if self.mode == "assetHierarchy":
-                self.b_next.setToolTip("Create asset and open the department dialog")
+                self.b_next.setToolTip("Create entity and open the department dialog")
 
             if not startText:
                 self.b_next.setEnabled(False)

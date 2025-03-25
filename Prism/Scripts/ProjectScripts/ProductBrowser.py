@@ -307,7 +307,11 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
     def showEvent(self, event):
         if not getattr(self, "headerHeightSet", False):
             spacing = self.w_tasks.layout().spacing()
-            h = self.w_entities.w_header.geometry().height() - spacing
+            if self.w_entities.isHidden():
+                h = self.w_version.geometry().height()
+            else:
+                h = self.w_entities.w_header.geometry().height() - spacing
+
             self.setHeaderHeight(h)
 
     @err_catcher(name=__name__)
@@ -1095,15 +1099,15 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                 if useDep:
                     dep = identifiers[tn].get("department") or "unknown"
                     if dep not in items:
-                        item = QTreeWidgetItem([dep])
-                        items[dep] = {"item": item, "tasks": {}}
-                        self.tw_identifier.invisibleRootItem().addChild(item)
+                        ditem = QTreeWidgetItem([dep])
+                        items[dep] = {"item": ditem, "tasks": {}}
+                        self.tw_identifier.invisibleRootItem().addChild(ditem)
 
                     task = identifiers[tn].get("task") or "unknown"
                     if task not in items[dep]["tasks"]:
-                        item = QTreeWidgetItem([task])
-                        items[dep]["tasks"][task] = {"item": item}
-                        items[dep]["item"].addChild(item)
+                        titem = QTreeWidgetItem([task])
+                        items[dep]["tasks"][task] = {"item": titem}
+                        items[dep]["item"].addChild(titem)
 
                     if tn in groups:
                         parent = groupItems[groups[tn]]
@@ -1112,9 +1116,9 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                 else:
                     task = identifiers[tn].get("task") or "unknown"
                     if task not in items:
-                        item = QTreeWidgetItem([task])
-                        items[task] = {"item": item}
-                        self.tw_identifier.invisibleRootItem().addChild(item)
+                        titem = QTreeWidgetItem([task])
+                        items[task] = {"item": titem}
+                        self.tw_identifier.invisibleRootItem().addChild(titem)
 
                     if tn in groups:
                         parent = groupItems[groups[tn]]
@@ -1292,6 +1296,14 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
             dateStamp = dateStamp or self.core.getFileModificationDate(filepath, asString=False)
         else:
             depExt = ""
+
+        if dateStamp and self.core.isStr(dateStamp):
+            from datetime import datetime
+            try:
+                timeStamp = datetime.strptime(dateStamp, "%d.%m.%y %X")
+                dateStamp = datetime.timestamp(timeStamp)
+            except:
+                pass
 
         row = self.tw_versions.rowCount()
         self.tw_versions.insertRow(row)
