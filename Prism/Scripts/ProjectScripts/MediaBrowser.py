@@ -2471,147 +2471,104 @@ class MediaPlayer(QWidget):
             return
 
         curFrame = self.getCurrentFrame()
-        pmsmall = QPixmap()
-        if (
-            len(self.seq) == 1
-            and os.path.splitext(self.seq[0])[1].lower()
-            in self.core.media.videoFormats
-        ):
-            fileName = self.seq[0]
-        else:
-            fileName = self.seq[curFrame]
+        pmsmall = QPixmap()  # Inicializar con un QPixmap vacío por defecto
 
-        _, ext = os.path.splitext(fileName)
-        ext = ext.lower()
-        if self.state == "disabled":
-            pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
-        else:
-            pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
-            if not pmsmall:
-                if ext in [
-                    ".jpg",
-                    ".jpeg",
-                    ".JPG",
-                    ".png",
-                    ".PNG",
-                    ".tif",
-                    ".tiff",
-                    ".tga"
-                ]:
-                    pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
-                    if pm:
-                        if pm.width() == 0 or pm.height() == 0:
-                            filename = "%s.jpg" % ext[1:].lower()
-                            imgPath = os.path.join(
-                                self.core.projects.getFallbackFolder(), filename
-                            )
-                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                            pmsmall = self.core.media.scalePixmap(
-                                pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
-                            )
-                        elif (pm.width() / float(pm.height())) > 1.7778:
-                            pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
+        try:
+            if (
+                len(self.seq) == 1
+                and os.path.splitext(self.seq[0])[1].lower()
+                in self.core.media.videoFormats
+            ):
+                fileName = self.seq[0]
+            else:
+                fileName = self.seq[curFrame]
+
+            _, ext = os.path.splitext(fileName)
+            ext = ext.lower()
+
+            if self.state == "disabled":
+                pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
+            else:
+                pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
+                if not pmsmall:
+                    if ext in [".jpg", ".jpeg", ".JPG", ".png", ".PNG", ".tif", ".tiff", ".tga"]:
+                        pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
+                        if pm:
+                            if pm.width() == 0 or pm.height() == 0:
+                                filename = "%s.jpg" % ext[1:].lower()
+                                imgPath = os.path.join(self.core.projects.getFallbackFolder(), filename)
+                                pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                                pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
+                            elif (pm.width() / float(pm.height())) > 1.7778:
+                                pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
+                            else:
+                                pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
                         else:
-                            pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
-                    else:
-                        pmsmall = self.core.media.getPixmapFromPath(
-                            os.path.join(
-                                self.core.projects.getFallbackFolder(),
-                                "%s.jpg" % ext[1:].lower(),
+                            pmsmall = self.core.media.getPixmapFromPath(os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower()))
+                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
+                    elif ext in [".exr", ".dpx", ".hdr"]:
+                        channel = (self.getSelectedContexts() or [{}])[0].get("channel")
+                        try:
+                            pmsmall = self.core.media.getPixmapFromExrPath(
+                                fileName,
+                                self.getThumbnailWidth(),
+                                self.getThumbnailHeight(),
+                                channel=channel,
+                                allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
+                                regenerateThumb=regenerateThumb,
                             )
-                        )
-                        pmsmall = self.core.media.scalePixmap(
-                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
-                        )
-                elif ext in [".exr", ".dpx", ".hdr"]:
-                    channel = (self.getSelectedContexts() or [{}])[0].get("channel")
-                    try:
-                        pmsmall = self.core.media.getPixmapFromExrPath(
-                            fileName,
-                            self.getThumbnailWidth(),
-                            self.getThumbnailHeight(),
-                            channel=channel,
-                            allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
-                            regenerateThumb=regenerateThumb,
-                        )
-                        if not pmsmall:
-                            raise RuntimeError("no image loader available")
-                    except Exception as e:
-                        logger.debug(e)
-                        pmsmall = self.core.media.getPixmapFromPath(
-                            os.path.join(
-                                self.core.projects.getFallbackFolder(),
-                                "%s.jpg" % ext[1:].lower(),
+                            if not pmsmall:
+                                raise RuntimeError("no image loader available")
+                        except Exception as e:
+                            logger.debug(e)
+                            pmsmall = self.core.media.getPixmapFromPath(
+                                os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
                             )
-                        )
-                        pmsmall = self.core.media.scalePixmap(
-                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
-                        )
-                elif ext in self.core.media.videoFormats:
-                    try:
-                        if len(self.seq) > 1:
-                            imgNum = 0
-                            vidFile = self.core.media.getVideoReader(fileName)
-                        else:
-                            imgNum = curFrame
-                            vidFile = self.vidPrw
-                            if vidFile == "loading":
-                                if fileName in self.videoReaders:
-                                    vidFile = self.videoReaders[fileName]
-                                else:
-                                    self.vidPrw = self.core.media.getVideoReader(fileName)
-                                    vidFile = self.vidPrw
-                                    if self.core.isStr(vidFile):
-                                        logger.warning(vidFile)
+                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
+                    elif ext in self.core.media.videoFormats:
+                        try:
+                            if len(self.seq) > 1:
+                                imgNum = 0
+                                vidFile = self.core.media.getVideoReader(fileName)
+                            else:
+                                imgNum = curFrame
+                                vidFile = self.vidPrw
+                                if vidFile == "loading":
+                                    if fileName in self.videoReaders:
+                                        vidFile = self.videoReaders[fileName]
+                                    else:
+                                        self.vidPrw = self.core.media.getVideoReader(fileName)
+                                        vidFile = self.vidPrw
+                                        if self.core.isStr(vidFile):
+                                            logger.warning(vidFile)
+                                        self.videoReaders[fileName] = vidFile
 
-                                    self.videoReaders[fileName] = vidFile
-
-                                if thread:
-                                    data = {"function": "updatePrvInfo", "args": [fileName], "kwargs": {"vidReader": vidFile, "seq": seq}}
-                                    thread.dataSent.emit(data)
-                                else:
-                                    self.updatePrvInfo(fileName, vidReader=vidFile, seq=seq)
-
-                        pm = self.core.media.getPixmapFromVideoPath(
+                            pm = self.core.media.getPixmapFromVideoPath(
                                 fileName,
                                 videoReader=vidFile,
                                 imgNum=imgNum,
                                 regenerateThumb=regenerateThumb
                             )
-                        pmsmall = self.core.media.scalePixmap(
-                            pm, self.getThumbnailWidth(), self.getThumbnailHeight()
-                        ) or QPixmap()
-                    except Exception as e:
-                        logger.debug(traceback.format_exc())
-                        imgPath = os.path.join(
-                            self.core.projects.getFallbackFolder(),
-                            "%s.jpg" % ext[1:].lower(),
-                        )
-                        pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                        pmsmall = self.core.media.scalePixmap(
-                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
-                        )
-                else:
-                    return False
+                            pmsmall = self.core.media.scalePixmap(pm, self.getThumbnailWidth(), self.getThumbnailHeight()) or QPixmap()
+                        except Exception as e:
+                            logger.debug(traceback.format_exc())
+                            imgPath = os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
+                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
 
-                if seq is not None:
-                    if self.seq != seq:
-                        logger.debug("exit preview update")
-                        return
+                    # Solo insertar en la caché si pmsmall es válido
+                    if pmsmall and not pmsmall.isNull():
+                        QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
+                    else:
+                        logger.warning("Failed to load or scale image for frame %s" % curFrame)
+                        pmsmall = self.emptypmap  # Usar una imagen de respaldo
 
-                QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
+        except Exception as e:
+            logger.error("Error in changeImg: %s" % str(e))
+            pmsmall = self.emptypmap  # Usar una imagen de respaldo en caso de error
 
-        if not self.prvIsSequence and len(self.seq) > 1:
-            fileName = self.seq[curFrame]
-            if thread:
-                thread.dataSent.emit({"function": "updatePrvInfo", "args": [fileName], "kwargs": {"seq": seq}})
-            else:
-                self.updatePrvInfo(fileName, seq=seq)
-
-        if thread:
-            thread.dataSent.emit({"function": "completeChangeImg", "args": [pmsmall, curFrame, ext], "kwargs": {}})
-        else:
-            self.completeChangeImg(pmsmall, curFrame, ext)
+        # Actualizar la vista previa
+        self.completeChangeImg(pmsmall, curFrame, ext)
 
     @err_catcher(name=__name__)
     def completeChangeImg(self, pmsmall, curFrame, ext):

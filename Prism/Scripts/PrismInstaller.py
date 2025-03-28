@@ -348,9 +348,8 @@ class Page_Finished(QWidget):
 
     def launchPrism(self):
         target = self.parent.core.prismRoot
-        exe = os.path.join(target, self.parent.core.pythonVersion, "Prism.exe")
         script = os.path.join(target, "Scripts", "PrismTray.py")
-        subprocess.Popen([exe, script, "projectBrowser"])
+        subprocess.Popen([sys.executable, script, "projectBrowser"])
 
     def entered(self):
         if not self.parent.w_pageStart.chb_integrations.isChecked():
