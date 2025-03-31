@@ -89,8 +89,9 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
+            ".MOV",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".MOV"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -277,21 +278,39 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def getVideoReader(self, filepath):
+        if not os.path.exists(filepath):
+            return "Error - file does not exist: %s" % filepath
+            
         if os.stat(filepath).st_size == 0:
-            reader = "Error - empty file: %s" % filepath
-        else:
+            return "Error - empty file: %s" % filepath
+
+        try:
+            filepath = str(filepath)
+    
+            if platform.system() == "Darwin":
+                filepath = os.path.abspath(filepath)
+                filepath = filepath.replace("\\", "/")
+                
             imageio = self.getImageIO()
-            filepath = str(filepath)  # unicode causes errors in Python 2
-            if platform.system() == "Windows":
-                filepath = filepath.lower()
-
-            try:
-                reader = imageio.get_reader(filepath, "ffmpeg")
-            except Exception as e:
-                reader = "Error - %s" % e
-
-        return reader
-
+            if imageio is None:
+                return "Error - imageio not initialized (try installing ffmpeg?)"
+                
+            backends = ["ffmpeg", "libav"]
+            last_error = None
+            
+            for backend in backends:
+                try:
+                    reader = imageio.get_reader(filepath, backend)
+                    if reader is not None:
+                        return reader
+                except Exception as e:
+                    last_error = str(e)
+            
+            return f"Error - All backends failed: {last_error}"
+                    
+        except Exception as e:
+            return f"Error - Unexpected error: {str(e)}"
+    
     @err_catcher(name=__name__)
     def checkMSVC(self):
         if platform.system() != "Windows":
@@ -353,13 +372,15 @@ class MediaManager(object):
     def getFFmpeg(self, validate=False):
         if platform.system() == "Windows":
             ffmpegPath = os.path.join(
-                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg.exe"
+                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg"
             )
         elif platform.system() == "Linux":
             ffmpegPath = "ffmpeg"
 
         elif platform.system() == "Darwin":
-            ffmpegPath = "ffmpeg"
+            ffmpegPath = "/usr/local/bin/ffmpeg"
+            if not os.path.exists(ffmpegPath):
+                ffmpegPath = "ffmpeg"
 
         if validate:
             result = self.validateFFmpeg(ffmpegPath)
@@ -384,7 +405,9 @@ class MediaManager(object):
 
         elif platform.system() == "Darwin":
             try:
-                subprocess.Popen([path], shell=True)
+                if not os.access(ffmpegPath, os.X_OK):
+                    raise Exception("FFmpeg no tiene permisos de ejecución en macOS.")
+                subprocess.Popen([ffmpegPath, "-version"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 ffmpegIsInstalled = True
             except:
                 pass
@@ -410,7 +433,7 @@ class MediaManager(object):
         inputpath = inputpath.replace("\\", "/")
         inputExt = os.path.splitext(inputpath)[1].lower()
         outputExt = os.path.splitext(outputpath)[1].lower()
-        videoInput = inputExt in [".mp4", ".mov", ".m4v"]
+        videoInput = inputExt in [".mp4", ".mov", ".m4v", ".MOV"]
         startNum = str(startNum) if startNum is not None else None
 
         ffmpegPath = self.getFFmpeg(validate=True)
@@ -941,36 +964,44 @@ nuke.execute(write, %s, %s)
                 break
             else:
                 try:
-                    os.makedirs(os.path.dirname(path))
+                    # Añadir permisos explícitos para macOS/Unix (755: owner rwx, group/others rx)
+                    os.makedirs(os.path.dirname(path), mode=0o755)
                     break
                 except FileExistsError:
                     break
-                except:
-                    msg = "Failed to create folder. Make sure you have the required permissions to create this folder.\n\n%s" % os.path.dirname(path)
+                except Exception as e:
+                    msg = "Failed to create folder. Make sure you have the required permissions to create this folder.\n\n%s\n\nError: %s" % (os.path.dirname(path), str(e))
                     result = self.core.popupQuestion(msg, buttons=["Retry", "Cancel"])
                     if result != "Retry":
                         return
 
+        # Guardar la imagen según el sistema operativo
         if platform.system() == "Windows":
             if os.path.splitext(path)[1].lower() == ".png":
                 pmap.save(path, "PNG", 95)
             else:
                 pmap.save(path, "JPG", 95)
-        else:
+        else:  # macOS/Linux
             try:
-                img = pmap.toImage()
-                buf = QBuffer()
-                buf.open(QIODevice.ReadWrite)
-                img.save(buf, "PNG")
-
-                strio = StringIO()
-                strio.write(buf.data())
-                buf.close()
-                strio.seek(0)
-                pimg = Image.open(strio)
-                pimg.save(path)
+                # Método 1: Usar Qt directamente (más eficiente si funciona)
+                if os.path.splitext(path)[1].lower() == ".png":
+                    pmap.save(path, "PNG", 95)
+                else:
+                    pmap.save(path, "JPG", 95)
             except:
-                pmap.save(path, "JPG")
+                # Método 2: Usar PIL/Pillow como fallback (para casos especiales)
+                try:
+                    from PIL import Image
+                    import io
+                    img = pmap.toImage()
+                    buffer = io.BytesIO()
+                    img.save(buffer, "PNG" if path.lower().endswith(".png") else "JPEG")
+                    with open(path, "wb") as f:
+                        f.write(buffer.getvalue())
+                except Exception as e:
+                    logger.warning(f"Failed to save pixmap on macOS/Linux: {str(e)}")
+                    # Último fallback: intentar guardar con Qt sin especificar calidad
+                    pmap.save(path)
 
     @err_catcher(name=__name__)
     def getPixmapFromUrl(self, url):
@@ -1189,7 +1220,7 @@ nuke.execute(write, %s, %s)
 
             path = paths[0]
 
-        comd = [progPath, path]
+        comd = [progPath, path.replace(" ", "\\")]
         logger.debug("opening media: %s" % comd)
         with open(os.devnull, "w") as f:
             try:
@@ -1216,9 +1247,12 @@ nuke.execute(write, %s, %s)
             )
         else:
             base = self.core.projects.getPreset("Default")["path"]
-            imgFile = os.path.join(
-                base, "00_Pipeline/Fallbacks/" + filename
-            )
+            if platform.system() == "Darwin":
+                imgFile = os.path.join(base, "00_Pipeline/Fallbacks", filename)
+            else:
+                imgFile = os.path.join(
+                    base, "00_Pipeline/Fallbacks/" + filename
+                )
 
         pmap = self.core.media.getPixmapFromPath(imgFile)
         if not pmap:
