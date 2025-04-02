@@ -378,9 +378,10 @@ class MediaManager(object):
             ffmpegPath = "ffmpeg"
 
         elif platform.system() == "Darwin":
-            ffmpegPath = "/usr/local/bin/ffmpeg"
-            if not os.path.exists(ffmpegPath):
-                ffmpegPath = "ffmpeg"
+            local_path =  os.path.join(
+                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg"
+            )
+            ffmpegPath = local_path if os.path.exists(local_path) else "ffmpeg"
 
         if validate:
             result = self.validateFFmpeg(ffmpegPath)
@@ -393,24 +394,33 @@ class MediaManager(object):
     def validateFFmpeg(self, path):
         ffmpegIsInstalled = False
 
-        if platform.system() == "Windows":
-            if os.path.exists(path):
-                ffmpegIsInstalled = True
-        elif platform.system() == "Linux":
-            try:
-                subprocess.Popen([path], shell=True)
-                ffmpegIsInstalled = True
-            except:
-                pass
-
-        elif platform.system() == "Darwin":
-            try:
-                if not os.access(ffmpegPath, os.X_OK):
-                    raise Exception("FFmpeg no tiene permisos de ejecución en macOS.")
-                subprocess.Popen([ffmpegPath, "-version"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                ffmpegIsInstalled = True
-            except:
-                pass
+        try:
+            if platform.system() == "Windows":
+                if os.path.exists(path):
+                    ffmpegIsInstalled = True
+            elif platform.system() in ["Linux", "Darwin"]:
+                # Verificar si es un comando del sistema o una ruta local
+                if path == "ffmpeg":
+                    # Verificar si está en el PATH
+                    result = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
+                    ffmpegIsInstalled = result.returncode == 0
+                else:
+                    # Verificar ruta local
+                    if os.path.exists(path):
+                        if platform.system() == "Darwin":
+                            # Verificar permisos de ejecución en macOS
+                            if not os.access(path, os.X_OK):
+                                try:
+                                    os.chmod(path, 0o755)  # Intentar dar permisos
+                                except:
+                                    pass
+                        # Probar ejecución
+                        test_cmd = [path, "-version"] if platform.system() == "Darwin" else [path]
+                        result = subprocess.run(test_cmd, capture_output=True)
+                        ffmpegIsInstalled = result.returncode == 0
+        except Exception as e:
+            logger.debug(f"Error validating FFmpeg: {str(e)}")
+            pass
 
         return ffmpegIsInstalled
 
@@ -431,6 +441,13 @@ class MediaManager(object):
     @err_catcher(name=__name__)
     def convertMedia(self, inputpath, startNum, outputpath, settings=None):
         inputpath = inputpath.replace("\\", "/")
+        outputpath = outputpath.replace("\\", "/")  
+
+        print("[DEBUG] Input path:", inputpath)
+        print("[DEBUG] Output path:", outputpath)
+        print("[DEBUG] ¿Existe el input?", os.path.exists(inputpath))
+        print("[DEBUG] ¿Directorio de salida existe?", os.path.exists(os.path.dirname(outputpath)))
+
         inputExt = os.path.splitext(inputpath)[1].lower()
         outputExt = os.path.splitext(outputpath)[1].lower()
         videoInput = inputExt in [".mp4", ".mov", ".m4v", ".MOV"]
@@ -497,6 +514,10 @@ class MediaManager(object):
             )
             args["-crf"] = str(quality)
 
+        if outputExt == ".exr":
+            args["-compression"] = "zip" 
+            args["-pix_fmt"] = "rgba64le"
+            
         if settings:
             args.update(settings)
 

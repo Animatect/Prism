@@ -3069,6 +3069,12 @@ class MediaPlayer(QWidget):
             conversionSettings["-profile"] = 2
             conversionSettings["-pix_fmt"] = "yuv422p10le"
 
+        if extension == ".exr" and not settings:
+            conversionSettings.update({
+                "-compression": "zip",
+                "-pix_fmt": "rgb48le"
+            })
+
         if self.prvIsSequence:
             inputpath = (
                 os.path.splitext(inputpath)[0][: -self.core.framePadding]
@@ -3147,7 +3153,7 @@ class MediaPlayer(QWidget):
         passes = [
             x
             for x in os.listdir(sourceFolder)
-            if x[-5:] not in ["(mp4)", "(jpg)", "(png)"]
+            if x[-5:] not in ["mp4", "jpg", "png"]
             and os.path.isdir(os.path.join(sourceFolder, x))
         ]
         sourceData = []
