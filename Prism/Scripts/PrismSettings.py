@@ -240,7 +240,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
 
                 if self.core.getPluginData(i, "canOverrideExecuteable") is not False:
                     l_ovr = QLabel(
-                        "By default Prism uses the default application configured in Windows to open scenefiles.\nThe following setting let you override this behaviour by defining explicit applications for opening scenefiles."
+                        "By default Prism uses the default application configured in the OS settings to open scenefiles.\nThe following setting let you override this behaviour by defining explicit applications for opening scenefiles."
                     )
                     chb_ovr = QCheckBox("Executable override")
                     le_ovr = QLineEdit()
@@ -269,7 +269,7 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
                     lo_integButtons = QHBoxLayout()
                     b_addInteg = QPushButton("Add")
                     b_removeInteg = QPushButton("Remove")
-                    examplePath = self.core.getPluginData(i, "examplePath")
+                    examplePath = self.core.getPluginData(i, "examplePath") or ""
                     l_examplePath = QLabel("Examplepath:\n\n" + examplePath)
 
                     w_integ.setLayout(lo_integButtons)
