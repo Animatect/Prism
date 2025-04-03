@@ -41,6 +41,7 @@ import traceback
 import glob
 import re
 import time
+import shlex
 
 from collections import OrderedDict
 
@@ -440,8 +441,20 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def convertMedia(self, inputpath, startNum, outputpath, settings=None):
-        inputpath = inputpath.replace("\\", "/")
-        outputpath = outputpath.replace("\\", "/")  
+        inputpath = shlex.quote(inputpath.replace("\\", "/"))
+        outputpath = shlex.quote(outputpath.replace("\\", "/"))  
+
+        if not os.path.exists(inputpath.strip("'")):
+            print(f"[ERROR] Input file not found: {inputpath}")
+            return None
+        
+        output_dir = os.path.dirname(outputpath.strip("'"))
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"[DEBUG] Directorio de salida creado: {output_dir}")
+        except Exception as e:
+            print(f"[ERROR] No se pudo crear el directorio {output_dir}: {e}")
+            return None
 
         print("[DEBUG] Input path:", inputpath)
         print("[DEBUG] Output path:", outputpath)
@@ -541,7 +554,7 @@ class MediaManager(object):
         argList += [outputpath, "-y"]
         logger.debug("Run ffmpeg with this settings: " + str(argList))
         nProc = subprocess.Popen(
-            argList, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
+            " ".join(argList), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
         )
         result = nProc.communicate()
 
