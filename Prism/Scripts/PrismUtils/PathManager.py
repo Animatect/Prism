@@ -97,6 +97,7 @@ class PathManager(object):
 
         if render and outputPath != "FileNotInPipeline":
             expandedOutputpath = os.path.expandvars(outputPath)
+            expandedOutputpath = expandedOutputpath.replace("%PRISM_JOB", os.getenv("PRISM_JOB"))
             if not os.path.exists(os.path.dirname(expandedOutputpath)):
                 try:
                     os.makedirs(os.path.dirname(expandedOutputpath))

@@ -211,6 +211,9 @@ class MediaProducts(object):
 
     @err_catcher(name=__name__)
     def getVersionsFromIdentifier(self, identifier, locations=None):
+        if not identifier:
+            return
+
         locationData = self.core.paths.getRenderProductBasePaths()
         searchLocations = []
         for locData in locationData:
@@ -464,6 +467,7 @@ class MediaProducts(object):
                         if ext:
                             filepaths.append(rpath)
                         else:
+                            rdfiles = []
                             for rdroot, rdfolders, rdfiles in os.walk(rpath):
                                 break
 
@@ -738,7 +742,7 @@ class MediaProducts(object):
         if not getExisting and not self.core.separateOutputVersionStack:
             fileName = self.core.getCurrentFileName()
             fnameData = self.core.getScenefileData(fileName)
-            if fnameData.get("type") in ["asset", "shot"]:
+            if fnameData.get("type") in ["asset", "shot"] and "version" in fnameData:
                 hVersion = fnameData["version"]
             else:
                 hVersion = self.core.versionFormat % self.core.lowestVersion
@@ -996,7 +1000,7 @@ class MediaProducts(object):
         if not validLocs:
             logger.warning(f"No valid location found for path: {path}")
             logger.warning(f"Configured base paths: {locDict}")
-            return None
+            return validLocs[0]
         
         return validLocs[0]
 
@@ -1571,3 +1575,23 @@ class MediaProducts(object):
                         outdatedVersions.append({"master": None, "latest": latestVersion})
 
         return outdatedVersions
+
+    @err_catcher(name=__name__)
+    def getGroupFromIdentifier(self, identifier):
+        identifierPath = self.getIdentifierPathFromEntity(identifier)
+        cfgPath = os.path.join(identifierPath, "identifiers" + self.core.configs.getProjectExtension())
+        group = self.core.getConfig(identifier.get("displayName"), "group", configPath=cfgPath)
+        return group
+
+    @err_catcher(name=__name__)
+    def setIdentifiersGroup(self, identifiers, group, projectWide=False):
+        identifierPath = self.getIdentifierPathFromEntity(identifiers[0])
+        cfgPath = os.path.join(identifierPath, "identifiers" + self.core.configs.getProjectExtension())
+        data = self.core.getConfig(configPath=cfgPath) or {}
+        for identifier in identifiers:
+            if identifier.get("displayName") not in data:
+                data[identifier.get("displayName")] = {}
+
+            data[identifier.get("displayName")]["group"] = group
+
+        self.core.setConfig(data=data, configPath=cfgPath)

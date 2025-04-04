@@ -255,7 +255,7 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
     def getCurrentData(self):
         curIdentifier = self.getCurrentIdentifier()
         if curIdentifier:
-            identifier = curIdentifier["displayName"]
+            identifier = curIdentifier.get("displayName") or ""
         else:
             identifier = ""
 
@@ -273,7 +273,7 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
 
         curSource = self.getCurrentSource()
         if curSource:
-            source = curSource["source"]
+            source = curSource.get("source") or ""
         else:
             source = ""
 
@@ -298,12 +298,29 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         return self.w_entities.getCurrentPage().getCurrentData(returnOne=False)
 
     @err_catcher(name=__name__)
-    def getCurrentIdentifier(self):
+    def getCurrentIdentifier(self, allowMultiple=False):
         items = self.tw_identifier.selectedItems()
+        items = [item for item in items if not (item.data(0, Qt.UserRole) or {}).get("isGroup")]
         if not items:
             return
 
-        return items[0].data(0, Qt.UserRole)
+        if len(items) > 1:
+            datas = []
+            if allowMultiple:
+                for item in items:
+                    data = item.data(0, Qt.UserRole)
+                    if data:
+                        datas.append(data)
+
+                return datas
+            else:
+                return
+        else:
+            data = items[0].data(0, Qt.UserRole)
+            if allowMultiple:
+                return [data]
+            else:
+                return data
 
     @err_catcher(name=__name__)
     def getCurrentVersion(self):
@@ -385,7 +402,10 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                                 items[dep]["tasks"][taskName] = {"item": item}
                                 items[dep]["item"].addChild(item)
 
-                            parent = items[dep]["tasks"][taskName]["item"]
+                            if task["displayName"] in groups:
+                                parent = groupItems[groups[task["displayName"]]]
+                            else:
+                                parent = items[dep]["tasks"][taskName]["item"]
                         else:
                             taskName = task.get("task") or "unknown"
                             if taskName not in items:
@@ -393,15 +413,20 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                                 items[taskName] = {"item": item}
                                 self.tw_identifier.invisibleRootItem().addChild(item)
 
-                            parent = items[taskName]["item"]
+                            if task["displayName"] in groups:
+                                parent = groupItems[groups[task["displayName"]]]
+                            else:
+                                parent = items[taskName]["item"]
 
-                        # if task["displayName"] in addedItems:
-                        #     continue
+                        parChildren = [parent.child(idx).text(0) for idx in range(parent.childCount())]
+                        if task["displayName"] in parChildren:
+                            continue
 
                         item = QTreeWidgetItem([task["displayName"]])
                         item.setData(0, Qt.UserRole, task)
                         parent.addChild(item)
             else:
+                groups, groupItems = self.createGroupItems(mediaTasks)
                 addedItems = []
                 for pType in ["3d", "2d", "playblast", "external"]:
                     for task in sorted(mediaTasks[pType], key=lambda x: x["displayName"]):
@@ -411,7 +436,11 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                         item = QTreeWidgetItem([task["displayName"]])
                         addedItems.append(task["displayName"])
                         item.setData(0, Qt.UserRole, task)
-                        parent = self.tw_identifier.invisibleRootItem()
+                        if task["displayName"] in groups:
+                            parent = groupItems[groups[task["displayName"]]]
+                        else:
+                            parent = self.tw_identifier.invisibleRootItem()
+
                         parent.addChild(item)
 
         if self.tw_identifier.topLevelItemCount() > 0:
@@ -432,6 +461,58 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         if not wasBlocked:
             self.tw_identifier.blockSignals(False)
             self.updateVersions(restoreSelection=True)
+
+    @err_catcher(name=__name__)
+    def createGroupItems(self, identifiers):
+        idfs = []
+        for idfType in identifiers:
+            for identifier in identifiers[idfType]:
+                if identifier["displayName"] not in [idf["displayName"] for idf in idfs]:
+                    idfs.append(identifier)
+
+        groups = {}
+        for idf in idfs:
+            identifierName = idf["displayName"]
+            group = self.core.mediaProducts.getGroupFromIdentifier(idf)
+            if group:
+                groups[identifierName] = group
+
+        groupNames = sorted(list(set(groups.values())))
+        groupItems = {}
+        for group in groupNames:
+            gfolders = group.split("/")
+            curPath = ""
+            for gfolder in gfolders:
+                
+                if not gfolder:
+                    continue
+
+                newPath = curPath
+                if newPath:
+                    newPath += "/"
+
+                newPath += gfolder
+                if newPath in groupItems:
+                    curPath = newPath
+                    continue
+
+                item = QTreeWidgetItem([gfolder])
+                item.setData(0, Qt.UserRole, {"isGroup": True})
+                iconPath = os.path.join(
+                    self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                )
+                icon = self.core.media.getColoredIcon(iconPath)
+                item.setIcon(0, icon)
+                if curPath and curPath in groupItems:
+                    parent = groupItems[curPath]
+                else:
+                    parent = self.tw_identifier.invisibleRootItem()
+
+                parent.addChild(item)
+                curPath = newPath
+                groupItems[curPath] = item
+
+        return groups, groupItems
 
     @err_catcher(name=__name__)
     def sortVersions(self, key):
@@ -823,9 +904,11 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
 
         if lw == self.tw_identifier:
             path = None
+            isGroup = False
             if itemName:
                 data = item.data(0, Qt.UserRole)
-                if data:
+                isGroup = data and data.get("isGroup")
+                if data and not isGroup:
                     path = data.get("path")
             
             if not path:
@@ -854,6 +937,25 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                 exAct.triggered.connect(self.ingestMediaDlg)
                 rcmenu.addAction(exAct)
 
+                if isGroup:
+                    depAct = QAction("Ungroup", self)
+                    iconPath = os.path.join(
+                        self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                    )
+                    icon = self.core.media.getColoredIcon(iconPath)
+                    depAct.setIcon(icon)
+                    depAct.triggered.connect(lambda: self.ungroupIdentifiers(itemName))
+                    rcmenu.addAction(depAct)
+                else:
+                    depAct = QAction("Group selected...", self)
+                    iconPath = os.path.join(
+                        self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                    )
+                    icon = self.core.media.getColoredIcon(iconPath)
+                    depAct.setIcon(icon)
+                    depAct.triggered.connect(self.groupIdentifiersDlg)
+                    rcmenu.addAction(depAct)
+
         elif lw == self.lw_version:
             refresh = self.updateVersions
             identifier = self.getCurrentIdentifier()
@@ -862,10 +964,10 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                 depAct.triggered.connect(self.createVersionDlg)
                 rcmenu.addAction(depAct)
 
-            if identifier["mediaType"] == "externalMedia":
-                nvAct = QAction("Create new External Version...", self)
-                nvAct.triggered.connect(self.newExternalVersion)
-                rcmenu.addAction(nvAct)
+                if identifier.get("mediaType") == "externalMedia":
+                    nvAct = QAction("Create new External Version...", self)
+                    nvAct.triggered.connect(self.newExternalVersion)
+                    rcmenu.addAction(nvAct)
 
             if item:
                 infAct = QAction("Edit comment...", self)
@@ -1071,6 +1173,19 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
             identifierType=mediaType,
             location=location,
         )
+        selItems = self.tw_identifier.selectedItems()
+        if len(selItems) == 1 and (selItems[0].data(0, Qt.UserRole) or {}).get("isGroup"):
+            item = selItems[0]
+            group = selItems[0].text(0)
+            while item.parent():
+                group = item.parent().text(0) + "/" + group
+                item = item.parent()
+
+            context = curEntity.copy()
+            displayName = self.core.mediaProducts.getDisplayNameForIdentifier(itemName, mediaType)
+            context["displayName"] = displayName
+            self.core.mediaProducts.setIdentifiersGroup([context], group=group)
+
         self.updateTasks()
         if itemName is not None:
             matches = self.tw_identifier.findItems(
@@ -1122,6 +1237,52 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
             )
             if matches:
                 self.lw_version.setCurrentItem(matches[0])
+
+    @err_catcher(name=__name__)
+    def groupIdentifiersDlg(self):
+        identifiers = self.getCurrentIdentifier(allowMultiple=True)
+        groups = [self.core.mediaProducts.getGroupFromIdentifier(identifier) for identifier in identifiers]
+        if len(list(set(groups))) == 1:
+            startText = groups[0]
+        else:
+            startText = ""
+
+        self.newItem = PrismWidgets.CreateItem(
+            core=self.core, showType=False, mode="identifier", startText=startText, valueRequired=False, allowChars="/"
+        )
+        self.newItem.setModal(True)
+        self.core.parentWindow(self.newItem)
+        self.newItem.e_item.setFocus()
+        self.newItem.setWindowTitle("Group selected identifiers")
+        self.newItem.l_item.setText("Group Name:")
+        self.newItem.buttonBox.buttons()[0].setText("Group")
+        self.newItem.accepted.connect(lambda: self.groupIdentifiers(self.newItem, identifiers))
+        self.newItem.chb_projectWide = QCheckBox("Project-Wide")
+        self.newItem.chb_projectWide.setToolTip("Creates this group for all identifiers with the same names for all assets and shots in the current project.")
+        # self.newItem.w_options.layout().addWidget(self.newItem.chb_projectWide)
+        self.newItem.show()
+
+    @err_catcher(name=__name__)
+    def groupIdentifiers(self, dlg, identifiers):
+        group = dlg.e_item.text()
+        projectWide = dlg.chb_projectWide.isChecked()
+        self.core.mediaProducts.setIdentifiersGroup(identifiers, group=group, projectWide=projectWide)
+        self.updateTasks(restoreSelection=True)
+
+    @err_catcher(name=__name__)
+    def ungroupIdentifiers(self, group):
+        identifiers = []
+        mediaTasks = self.getMediaTasks()
+        for idfType in mediaTasks:
+            for identifier in mediaTasks[idfType]:
+                if identifier["displayName"] not in [idf["displayName"] for idf in identifiers]:
+                    igroup = self.core.mediaProducts.getGroupFromIdentifier(identifier)
+                    if igroup == group:
+                        identifiers.append(identifier)
+
+        if identifiers:
+            self.core.mediaProducts.setIdentifiersGroup(identifiers, group=None)
+            self.updateTasks(restoreSelection=True)
 
     @err_catcher(name=__name__)
     def setMaster(self, context):
@@ -1332,16 +1493,23 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         entity = self.getCurrentEntity()
         identifier = self.getCurrentIdentifier()
         version = self.core.mediaProducts.getLatestVersionFromIdentifier(identifier)
-        startPath = self.core.mediaProducts.getExternalPathFromVersion(version)
-        intVersion = self.core.products.getIntVersionFromVersionName(version["version"])
+        if version:
+            startPath = self.core.mediaProducts.getExternalPathFromVersion(version)
+            intVersion = self.core.products.getIntVersionFromVersionName(version["version"])
+        else:
+            startPath = None
+            intVersion = self.core.lowestVersion
 
         self.ep = ProjectWidgets.IngestMediaDlg(core=self.core, entity=entity, parent=self)
         self.ep.e_identifier.setText(identifier["identifier"])
-        self.ep.setMediaPaths(startPath)
+        if startPath:
+            self.ep.setMediaPaths(startPath)
+
+        self.ep.cb_identifierType.setCurrentText("External")
         self.ep.sp_version.setValue(intVersion)
-        self.ep.enableOk(identifier["identifier"], self.ep.e_identifier)
+        self.ep.enableOk()
         self.ep.setWindowTitle("Create new version")
-        self.ep.e_version.setFocus()
+        self.ep.sp_version.setFocus()
         self.activateWindow()
         self.ep.accepted.connect(self.ingestMedia)
         self.ep.show()
@@ -2471,104 +2639,148 @@ class MediaPlayer(QWidget):
             return
 
         curFrame = self.getCurrentFrame()
-        pmsmall = QPixmap()  # Inicializar con un QPixmap vacío por defecto
+        pmsmall = QPixmap()
+        if (
+            len(self.seq) == 1
+            and os.path.splitext(self.seq[0])[1].lower()
+            in self.core.media.videoFormats
+        ):
+            fileName = self.seq[0]
+        else:
+            fileName = self.seq[curFrame]
 
-        try:
-            if (
-                len(self.seq) == 1
-                and os.path.splitext(self.seq[0])[1].lower()
-                in self.core.media.videoFormats
-            ):
-                fileName = self.seq[0]
-            else:
-                fileName = self.seq[curFrame]
-
-            _, ext = os.path.splitext(fileName)
-            ext = ext.lower()
-
-            if self.state == "disabled":
-                pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
-            else:
-                pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
-                if not pmsmall:
-                    if ext in [".jpg", ".jpeg", ".JPG", ".png", ".PNG", ".tif", ".tiff", ".tga"]:
-                        pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
-                        if pm:
-                            if pm.width() == 0 or pm.height() == 0:
-                                filename = "%s.jpg" % ext[1:].lower()
-                                imgPath = os.path.join(self.core.projects.getFallbackFolder(), filename)
-                                pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                                pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                            elif (pm.width() / float(pm.height())) > 1.7778:
-                                pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
-                            else:
-                                pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
+        _, ext = os.path.splitext(fileName)
+        ext = ext.lower()
+        if self.state == "disabled":
+            pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
+        else:
+            pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
+            if not pmsmall:
+                if ext in [
+                    ".jpg",
+                    ".jpeg",
+                    ".JPG",
+                    ".png",
+                    ".PNG",
+                    ".tif",
+                    ".tiff",
+                    ".tga"
+                ]:
+                    pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
+                    if pm:
+                        if pm.width() == 0 or pm.height() == 0:
+                            filename = "%s.jpg" % ext[1:].lower()
+                            imgPath = os.path.join(
+                                self.core.projects.getFallbackFolder(), filename
+                            )
+                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                            pmsmall = self.core.media.scalePixmap(
+                                pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                            )
+                        elif (pm.width() / float(pm.height())) > 1.7778:
+                            pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
                         else:
-                            pmsmall = self.core.media.getPixmapFromPath(os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower()))
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                    elif ext in [".exr", ".dpx", ".hdr"]:
-                        channel = (self.getSelectedContexts() or [{}])[0].get("channel")
-                        try:
-                            pmsmall = self.core.media.getPixmapFromExrPath(
-                                fileName,
-                                self.getThumbnailWidth(),
-                                self.getThumbnailHeight(),
-                                channel=channel,
-                                allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
-                                regenerateThumb=regenerateThumb,
+                            pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
+                    else:
+                        pmsmall = self.core.media.getPixmapFromPath(
+                            os.path.join(
+                                self.core.projects.getFallbackFolder(),
+                                "%s.jpg" % ext[1:].lower(),
                             )
-                            if not pmsmall:
-                                raise RuntimeError("no image loader available")
-                        except Exception as e:
-                            logger.debug(e)
-                            pmsmall = self.core.media.getPixmapFromPath(
-                                os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
+                        )
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                elif ext in [".exr", ".dpx", ".hdr"]:
+                    channel = (self.getSelectedContexts() or [{}])[0].get("channel")
+                    try:
+                        pmsmall = self.core.media.getPixmapFromExrPath(
+                            fileName,
+                            self.getThumbnailWidth(),
+                            self.getThumbnailHeight(),
+                            channel=channel,
+                            allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
+                            regenerateThumb=regenerateThumb,
+                        )
+                        if not pmsmall:
+                            raise RuntimeError("no image loader available")
+                    except Exception as e:
+                        logger.debug(e)
+                        pmsmall = self.core.media.getPixmapFromPath(
+                            os.path.join(
+                                self.core.projects.getFallbackFolder(),
+                                "%s.jpg" % ext[1:].lower(),
                             )
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                    elif ext in self.core.media.videoFormats:
-                        try:
-                            if len(self.seq) > 1:
-                                imgNum = 0
-                                vidFile = self.core.media.getVideoReader(fileName)
-                            else:
-                                imgNum = curFrame
-                                vidFile = self.vidPrw
-                                if vidFile == "loading":
-                                    if fileName in self.videoReaders:
-                                        vidFile = self.videoReaders[fileName]
-                                    else:
-                                        self.vidPrw = self.core.media.getVideoReader(fileName)
-                                        vidFile = self.vidPrw
-                                        if self.core.isStr(vidFile):
-                                            logger.warning(vidFile)
-                                        self.videoReaders[fileName] = vidFile
+                        )
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                elif ext in self.core.media.videoFormats:
+                    try:
+                        if len(self.seq) > 1:
+                            imgNum = 0
+                            vidFile = self.core.media.getVideoReader(fileName)
+                        else:
+                            imgNum = curFrame
+                            vidFile = self.vidPrw
+                            if vidFile == "loading":
+                                if fileName in self.videoReaders:
+                                    vidFile = self.videoReaders[fileName]
+                                else:
+                                    self.vidPrw = self.core.media.getVideoReader(fileName)
+                                    vidFile = self.vidPrw
+                                    if self.core.isStr(vidFile):
+                                        logger.warning(vidFile)
 
-                            pm = self.core.media.getPixmapFromVideoPath(
+                                    self.videoReaders[fileName] = vidFile
+
+                                if thread:
+                                    data = {"function": "updatePrvInfo", "args": [fileName], "kwargs": {"vidReader": vidFile, "seq": seq}}
+                                    thread.dataSent.emit(data)
+                                else:
+                                    self.updatePrvInfo(fileName, vidReader=vidFile, seq=seq)
+
+                        pm = self.core.media.getPixmapFromVideoPath(
                                 fileName,
                                 videoReader=vidFile,
                                 imgNum=imgNum,
                                 regenerateThumb=regenerateThumb
                             )
-                            pmsmall = self.core.media.scalePixmap(pm, self.getThumbnailWidth(), self.getThumbnailHeight()) or QPixmap()
-                        except Exception as e:
-                            logger.debug(traceback.format_exc())
-                            imgPath = os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
-                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
+                        pmsmall = self.core.media.scalePixmap(
+                            pm, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        ) or QPixmap()
+                    except Exception as e:
+                        logger.debug(traceback.format_exc())
+                        imgPath = os.path.join(
+                            self.core.projects.getFallbackFolder(),
+                            "%s.jpg" % ext[1:].lower(),
+                        )
+                        pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                else:
+                    return False
 
-                    # Solo insertar en la caché si pmsmall es válido
-                    if pmsmall and not pmsmall.isNull():
-                        QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
-                    else:
-                        logger.warning("Failed to load or scale image for frame %s" % curFrame)
-                        pmsmall = self.emptypmap  # Usar una imagen de respaldo
+                if seq is not None:
+                    if self.seq != seq:
+                        logger.debug("exit preview update")
+                        return
 
-        except Exception as e:
-            logger.error("Error in changeImg: %s" % str(e))
-            pmsmall = self.emptypmap  # Usar una imagen de respaldo en caso de error
+                if pmsmall:
+                    QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
 
-        # Actualizar la vista previa
-        self.completeChangeImg(pmsmall, curFrame, ext)
+        if not self.prvIsSequence and len(self.seq) > 1:
+            fileName = self.seq[curFrame]
+            if thread:
+                thread.dataSent.emit({"function": "updatePrvInfo", "args": [fileName], "kwargs": {"seq": seq}})
+            else:
+                self.updatePrvInfo(fileName, seq=seq)
+
+        if thread:
+            thread.dataSent.emit({"function": "completeChangeImg", "args": [pmsmall, curFrame, ext], "kwargs": {}})
+        else:
+            self.completeChangeImg(pmsmall, curFrame, ext)
 
     @err_catcher(name=__name__)
     def completeChangeImg(self, pmsmall, curFrame, ext):
@@ -3069,12 +3281,6 @@ class MediaPlayer(QWidget):
             conversionSettings["-profile"] = 2
             conversionSettings["-pix_fmt"] = "yuv422p10le"
 
-        if extension == ".exr" and not settings:
-            conversionSettings.update({
-                "-compression": "zip",
-                "-pix_fmt": "rgb48le"
-            })
-
         if self.prvIsSequence:
             inputpath = (
                 os.path.splitext(inputpath)[0][: -self.core.framePadding]
@@ -3153,7 +3359,7 @@ class MediaPlayer(QWidget):
         passes = [
             x
             for x in os.listdir(sourceFolder)
-            if x[-5:] not in ["mp4", "jpg", "png"]
+            if x[-5:] not in ["(mp4)", "(jpg)", "(png)"]
             and os.path.isdir(os.path.join(sourceFolder, x))
         ]
         sourceData = []

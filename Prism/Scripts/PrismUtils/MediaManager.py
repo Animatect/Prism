@@ -90,9 +90,8 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
-            ".MOV",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".MOV"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -373,7 +372,7 @@ class MediaManager(object):
     def getFFmpeg(self, validate=False):
         if platform.system() == "Windows":
             ffmpegPath = os.path.join(
-                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg"
+                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg.exe"
             )
         elif platform.system() == "Linux":
             ffmpegPath = "ffmpeg"
@@ -399,7 +398,15 @@ class MediaManager(object):
             if platform.system() == "Windows":
                 if os.path.exists(path):
                     ffmpegIsInstalled = True
-            elif platform.system() in ["Linux", "Darwin"]:
+
+            elif platform.system() == "Linux":
+                try:
+                    subprocess.Popen([path], shell=True)
+                    ffmpegIsInstalled = True
+                except:
+                    pass
+                
+            elif platform.system() == "Darwin":
                 # Verificar si es un comando del sistema o una ruta local
                 if path == "ffmpeg":
                     # Verificar si está en el PATH
@@ -463,7 +470,7 @@ class MediaManager(object):
 
         inputExt = os.path.splitext(inputpath)[1].lower()
         outputExt = os.path.splitext(outputpath)[1].lower()
-        videoInput = inputExt in [".mp4", ".mov", ".m4v", ".MOV"]
+        videoInput = inputExt in [".mp4", ".mov", ".m4v"]
         startNum = str(startNum) if startNum is not None else None
 
         ffmpegPath = self.getFFmpeg(validate=True)
@@ -479,7 +486,10 @@ class MediaManager(object):
             return
 
         if not os.path.exists(os.path.dirname(outputpath)):
-            os.makedirs(os.path.dirname(outputpath))
+            try:
+                os.makedirs(os.path.dirname(outputpath))
+            except FileExistsError:
+                pass
 
         if videoInput:
             args = OrderedDict(
@@ -527,10 +537,6 @@ class MediaManager(object):
             )
             args["-crf"] = str(quality)
 
-        if outputExt == ".exr":
-            args["-compression"] = "zip" 
-            args["-pix_fmt"] = "rgba64le"
-            
         if settings:
             args.update(settings)
 
@@ -693,7 +699,10 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            os.makedirs(os.path.dirname(outputPath))
+            try:
+                os.makedirs(os.path.dirname(outputPath))
+            except FileExistsError:
+                pass
 
         outputPath = outputPath.replace("\\", "/")
 
@@ -764,7 +773,10 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            os.makedirs(os.path.dirname(outputPath))
+            try:
+                os.makedirs(os.path.dirname(outputPath))
+            except FileExistsError:
+                pass
 
         outputPath = outputPath.replace("\\", "/")
         start = end = 1
@@ -998,7 +1010,6 @@ nuke.execute(write, %s, %s)
                 break
             else:
                 try:
-                    # Añadir permisos explícitos para macOS/Unix (755: owner rwx, group/others rx)
                     os.makedirs(os.path.dirname(path), mode=0o755)
                     break
                 except FileExistsError:
@@ -1009,13 +1020,29 @@ nuke.execute(write, %s, %s)
                     if result != "Retry":
                         return
 
-        # Guardar la imagen según el sistema operativo
         if platform.system() == "Windows":
             if os.path.splitext(path)[1].lower() == ".png":
                 pmap.save(path, "PNG", 95)
             else:
                 pmap.save(path, "JPG", 95)
-        else:  # macOS/Linux
+
+        else:
+            try:
+                img = pmap.toImage()
+                buf = QBuffer()
+                buf.open(QIODevice.ReadWrite)
+                img.save(buf, "PNG")
+
+                strio = StringIO()
+                strio.write(buf.data())
+                buf.close()
+                strio.seek(0)
+                pimg = Image.open(strio)
+                pimg.save(path)
+            except:
+                pmap.save(path, "JPG")
+
+        if platform.system() == "Darwin":
             try:
                 # Método 1: Usar Qt directamente (más eficiente si funciona)
                 if os.path.splitext(path)[1].lower() == ".png":

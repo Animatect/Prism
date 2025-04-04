@@ -587,6 +587,9 @@ class EditShot(QDialog, EditShot_ui.Ui_dlg_EditShot):
                 for preset in presets:
                     self.cb_taskPreset.addItem(preset.get("name", ""), preset)
 
+                if "Default" in [p.get("name") for p in presets]:
+                    self.cb_taskPreset.setCurrentText("Default")
+
                 self.layout().insertWidget(self.layout().indexOf(self.w_buttons)-2, self.w_taskPreset)
 
         if not pmap:

@@ -117,7 +117,9 @@ class ProjectBrowser(QMainWindow, ProjectBrowser_ui.Ui_mw_ProjectBrowser):
         self.actionCheckForUpdates.toggled.connect(self.triggerUpdates)
         self.actionCheckForShotFrameRange.toggled.connect(self.triggerFrameranges)
         self.actionCloseAfterLoad.toggled.connect(self.triggerCloseLoad)
-        self.actionAutoplay.toggled.connect(self.mediaBrowser.triggerAutoplay)
+        if hasattr(self, "mediaBrowser"):
+            self.actionAutoplay.toggled.connect(self.mediaBrowser.triggerAutoplay)
+
         self.act_filesizes.toggled.connect(self.triggerShowFileSizes)
         self.act_rememberTab.toggled.connect(self.triggerRememberTab)
         self.act_rememberWidgetSizes.toggled.connect(self.triggerRememberWidgetSizes)

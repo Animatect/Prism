@@ -101,8 +101,8 @@ class ImportFileClass(object):
             if importPaths:
                 importPath = importPaths[-1]
                 if len(importPaths) > 1:
-                    for importPath in importPaths[:-1]:
-                        stateManager.importFile(importPath)
+                    for impPath in importPaths[:-1]:
+                        stateManager.importFile(impPath)
 
         if importPath:
             self.setImportPath(importPath)

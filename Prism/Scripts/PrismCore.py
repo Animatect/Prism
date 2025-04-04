@@ -77,22 +77,21 @@ scriptPath = os.path.join(prismRoot, "Scripts")
 if scriptPath not in sys.path:
     sys.path.append(scriptPath)
 
-if pyLibs:
-    pyLibPath = os.path.join(prismLibs, "PythonLibs", pyLibs)
-
 cpLibs = os.path.join(prismLibs, "PythonLibs", "CrossPlatform")
 
 if cpLibs not in sys.path:
     sys.path.append(cpLibs)
 
-if pyLibPath not in sys.path:
-    sys.path.append(pyLibPath)
+if pyLibs:
+    pyLibPath = os.path.join(prismLibs, "PythonLibs", pyLibs)
+    if pyLibPath not in sys.path:
+        sys.path.append(pyLibPath)
 
 py3LibPath = os.path.join(prismLibs, "PythonLibs", "Python3")
 if py3LibPath not in sys.path:
     sys.path.append(py3LibPath)
 
-if platform.system() == "Windows":
+if platform.system() == "Windows" and pyLibs:
     sys.path.insert(0, os.path.join(pyLibPath, "win32"))
     sys.path.insert(0, os.path.join(pyLibPath, "win32", "lib"))
     pywinpath = os.path.join(pyLibPath, "pywin32_system32")
@@ -176,7 +175,7 @@ class PrismCore:
 
         try:
             # set some general variables
-            self.version = "v2.0.15"
+            self.version = "v2.0.16"
             self.requiredLibraries = "v2.0.0"
             self.core = self
             self.preferredExtension = os.getenv("PRISM_CONFIG_EXTENSION", ".json")
@@ -1984,6 +1983,9 @@ License: GNU LGPL-3.0-or-later<br>
 
         detailData.update(details)
         if prismReq:
+            if versionUp:
+                detailData["version"] = fVersion
+
             if not preview and self.core.getConfig("globals", "capture_viewport", config="user", dft=True):
                 appPreview = getattr(self.appPlugin, "captureViewportThumbnail", lambda: None)()
                 if appPreview:
@@ -3049,6 +3051,8 @@ License: GNU LGPL-3.0-or-later<br>
         ) or False
         if useEpisodes:
             envvars["PRISM_EPISODE"] = ""
+        elif "PRISM_EPISODE" in os.environ:
+            del os.environ["PRISM_EPISODE"]
 
         for envvar in envvars:
             envvars[envvar] = os.getenv(envvar)
@@ -3059,7 +3063,7 @@ License: GNU LGPL-3.0-or-later<br>
         data = self.getScenefileData(fn)
         if data.get("type") == "asset":
             if useEpisodes:
-                envvars["PRISM_EPISODE"] = ""
+                newenv["PRISM_EPISODE"] = ""
 
             newenv["PRISM_SEQUENCE"] = ""
             newenv["PRISM_SHOT"] = ""
@@ -3069,13 +3073,13 @@ License: GNU LGPL-3.0-or-later<br>
             newenv["PRISM_ASSET"] = ""
             newenv["PRISM_ASSETPATH"] = ""
             if useEpisodes:
-                envvars["PRISM_EPISODE"] = data.get("episode", "")
+                newenv["PRISM_EPISODE"] = data.get("episode", "")
 
             newenv["PRISM_SEQUENCE"] = data.get("sequence", "")
             newenv["PRISM_SHOT"] = data.get("shot", "")
         else:
             if useEpisodes:
-                envvars["PRISM_EPISODE"] = ""
+                newenv["PRISM_EPISODE"] = ""
 
             newenv["PRISM_SEQUENCE"] = ""
             newenv["PRISM_SHOT"] = ""

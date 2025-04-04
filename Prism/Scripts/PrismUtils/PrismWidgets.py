@@ -72,6 +72,7 @@ class CreateItem(QDialog, CreateItem_ui.Ui_dlg_CreateItem):
         self.clickedButton = None
         self.e_item.setText(startText)
         self.e_item.selectAll()
+        self.taskList = []
 
         if self.valueRequired and not startText:
             self.buttonBox.button(QDialogButtonBox.Ok).setEnabled(False)

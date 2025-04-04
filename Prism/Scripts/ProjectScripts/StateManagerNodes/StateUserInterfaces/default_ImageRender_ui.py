@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'default_ImageRender.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.6.2
+## Created by: Qt User Interface Compiler version 6.8.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -103,14 +103,14 @@ class Ui_wg_ImageRender(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.l_taskName.sizePolicy().hasHeightForWidth())
         self.l_taskName.setSizePolicy(sizePolicy)
-        self.l_taskName.setAlignment(Qt.AlignCenter)
+        self.l_taskName.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.horizontalLayout_10.addWidget(self.l_taskName)
 
         self.b_changeTask = QPushButton(self.f_taskname)
         self.b_changeTask.setObjectName(u"b_changeTask")
         self.b_changeTask.setEnabled(True)
-        self.b_changeTask.setFocusPolicy(Qt.NoFocus)
+        self.b_changeTask.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.horizontalLayout_10.addWidget(self.b_changeTask)
 
@@ -149,7 +149,7 @@ class Ui_wg_ImageRender(object):
         self.l_rangeEnd = QLabel(self.w_frameRangeValues)
         self.l_rangeEnd.setObjectName(u"l_rangeEnd")
         self.l_rangeEnd.setMinimumSize(QSize(30, 0))
-        self.l_rangeEnd.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.l_rangeEnd.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout.addWidget(self.l_rangeEnd, 1, 5, 1, 1)
 
@@ -170,7 +170,7 @@ class Ui_wg_ImageRender(object):
         self.l_rangeStart = QLabel(self.w_frameRangeValues)
         self.l_rangeStart.setObjectName(u"l_rangeStart")
         self.l_rangeStart.setMinimumSize(QSize(30, 0))
-        self.l_rangeStart.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.l_rangeStart.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout.addWidget(self.l_rangeStart, 0, 5, 1, 1)
 
@@ -283,7 +283,7 @@ class Ui_wg_ImageRender(object):
         self.b_resPresets.setEnabled(False)
         self.b_resPresets.setMinimumSize(QSize(23, 23))
         self.b_resPresets.setMaximumSize(QSize(23, 23))
-        self.b_resPresets.setFocusPolicy(Qt.NoFocus)
+        self.b_resPresets.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.horizontalLayout_9.addWidget(self.b_resPresets)
 
@@ -449,7 +449,7 @@ class Ui_wg_ImageRender(object):
         self.b_version.setEnabled(False)
         self.b_version.setMinimumSize(QSize(23, 23))
         self.b_version.setMaximumSize(QSize(23, 23))
-        self.b_version.setFocusPolicy(Qt.NoFocus)
+        self.b_version.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.horizontalLayout_12.addWidget(self.b_version)
 
@@ -529,6 +529,7 @@ class Ui_wg_ImageRender(object):
 
         self.sp_rjFramesPerTask = QSpinBox(self.f_rjWidgetsPerTask)
         self.sp_rjFramesPerTask.setObjectName(u"sp_rjFramesPerTask")
+        self.sp_rjFramesPerTask.setMinimum(1)
         self.sp_rjFramesPerTask.setMaximum(9999)
         self.sp_rjFramesPerTask.setValue(5)
 
@@ -667,7 +668,7 @@ class Ui_wg_ImageRender(object):
         self.b_osSlaves = QPushButton(self.gb_osSlaves)
         self.b_osSlaves.setObjectName(u"b_osSlaves")
         self.b_osSlaves.setMaximumSize(QSize(25, 16777215))
-        self.b_osSlaves.setFocusPolicy(Qt.NoFocus)
+        self.b_osSlaves.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.horizontalLayout_25.addWidget(self.b_osSlaves)
 
@@ -759,14 +760,14 @@ class Ui_wg_ImageRender(object):
         self.lw_passes = QListWidget(self.gb_passes)
         self.lw_passes.setObjectName(u"lw_passes")
         self.lw_passes.setMaximumSize(QSize(16777215, 500))
-        self.lw_passes.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.lw_passes.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.lw_passes.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lw_passes.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         self.verticalLayout_5.addWidget(self.lw_passes)
 
         self.b_addPasses = QPushButton(self.gb_passes)
         self.b_addPasses.setObjectName(u"b_addPasses")
-        self.b_addPasses.setFocusPolicy(Qt.NoFocus)
+        self.b_addPasses.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.verticalLayout_5.addWidget(self.b_addPasses)
 
@@ -785,7 +786,7 @@ class Ui_wg_ImageRender(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 349, 214))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 349, 139))
         self.verticalLayout_3 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.l_pathLast = QLabel(self.scrollAreaWidgetContents)
@@ -800,7 +801,7 @@ class Ui_wg_ImageRender(object):
         self.b_pathLast = QToolButton(self.gb_previous)
         self.b_pathLast.setObjectName(u"b_pathLast")
         self.b_pathLast.setEnabled(True)
-        self.b_pathLast.setArrowType(Qt.DownArrow)
+        self.b_pathLast.setArrowType(Qt.ArrowType.DownArrow)
 
         self.horizontalLayout_18.addWidget(self.b_pathLast)
 
