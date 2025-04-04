@@ -90,8 +90,9 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
+            ".MOV",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".MOV"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -372,7 +373,7 @@ class MediaManager(object):
     def getFFmpeg(self, validate=False):
         if platform.system() == "Windows":
             ffmpegPath = os.path.join(
-                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg.exe"
+                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg"
             )
         elif platform.system() == "Linux":
             ffmpegPath = "ffmpeg"
@@ -398,15 +399,7 @@ class MediaManager(object):
             if platform.system() == "Windows":
                 if os.path.exists(path):
                     ffmpegIsInstalled = True
-
-            elif platform.system() == "Linux":
-                try:
-                    subprocess.Popen([path], shell=True)
-                    ffmpegIsInstalled = True
-                except:
-                    pass
-                
-            elif platform.system() == "Darwin":
+            elif platform.system() in ["Linux", "Darwin"]:
                 # Verificar si es un comando del sistema o una ruta local
                 if path == "ffmpeg":
                     # Verificar si está en el PATH
@@ -448,14 +441,15 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def convertMedia(self, inputpath, startNum, outputpath, settings=None):
-        inputpath = shlex.quote(inputpath.replace("\\", "/"))
-        outputpath = shlex.quote(outputpath.replace("\\", "/"))  
+        # Limpiar rutas (remover comillas existentes y normalizar barras)
+        clean_inputpath = inputpath.replace("\\", "/").strip('"\'')
+        clean_outputpath = outputpath.replace("\\", "/").strip('"\'')
 
-        if not os.path.exists(inputpath.strip("'")):
-            print(f"[ERROR] Input file not found: {inputpath}")
+        if not os.path.exists(clean_inputpath):
+            print(f"[ERROR] Input file not found: {clean_inputpath}")
             return None
         
-        output_dir = os.path.dirname(outputpath.strip("'"))
+        output_dir = os.path.dirname(clean_outputpath)
         try:
             os.makedirs(output_dir, exist_ok=True)
             print(f"[DEBUG] Directorio de salida creado: {output_dir}")
@@ -463,13 +457,13 @@ class MediaManager(object):
             print(f"[ERROR] No se pudo crear el directorio {output_dir}: {e}")
             return None
 
-        print("[DEBUG] Input path:", inputpath)
-        print("[DEBUG] Output path:", outputpath)
-        print("[DEBUG] ¿Existe el input?", os.path.exists(inputpath))
-        print("[DEBUG] ¿Directorio de salida existe?", os.path.exists(os.path.dirname(outputpath)))
+        print("[DEBUG] Input path:", clean_inputpath)
+        print("[DEBUG] Output path:", clean_outputpath)
+        print("[DEBUG] ¿Existe el input?", os.path.exists(clean_inputpath))
+        print("[DEBUG] ¿Directorio de salida existe?", os.path.exists(output_dir))
 
-        inputExt = os.path.splitext(inputpath)[1].lower()
-        outputExt = os.path.splitext(outputpath)[1].lower()
+        inputExt = os.path.splitext(clean_inputpath)[1].lower()
+        outputExt = os.path.splitext(clean_outputpath)[1].lower()
         videoInput = inputExt in [".mp4", ".mov", ".m4v"]
         startNum = str(startNum) if startNum is not None else None
 
@@ -478,65 +472,51 @@ class MediaManager(object):
         if not ffmpegPath:
             msg = "Could not find ffmpeg"
             if platform.system() == "Darwin":
-                msg += (
-                    '\n\nYou can install it with this command:\n"brew install ffmpeg"'
-                )
-
+                msg += '\n\nYou can install it with this command:\n"brew install ffmpeg"'
             self.core.popup(msg, severity="critical")
             return
 
-        if not os.path.exists(os.path.dirname(outputpath)):
-            try:
-                os.makedirs(os.path.dirname(outputpath))
-            except FileExistsError:
-                pass
+        # Asegurar que las rutas estén entre comillas para ffmpeg
+        quoted_inputpath = f'"{clean_inputpath}"'
+        quoted_outputpath = f'"{clean_outputpath}"'
 
         if videoInput:
-            args = OrderedDict(
-                [
-                    ("-apply_trc", "iec61966_2_1"),
-                    ("-i", inputpath),
-                    ("-pix_fmt", "yuva420p"),
-                    ("-start_number", startNum),
-                ]
-            )
-
+            args = OrderedDict([
+                ("-apply_trc", "iec61966_2_1"),
+                ("-i", quoted_inputpath),
+                ("-pix_fmt", "yuva420p"),
+                ("-start_number", startNum),
+            ])
         else:
             fps = "25"
-            if self.core.getConfig(
-                "globals", "forcefps", configPath=self.core.prismIni
-            ):
-                fps = self.core.getConfig(
-                    "globals", "fps", configPath=self.core.prismIni
-                )
+            if self.core.getConfig("globals", "forcefps", configPath=self.core.prismIni):
+                fps = self.core.getConfig("globals", "fps", configPath=self.core.prismIni)
 
-            args = OrderedDict(
-                [
-                    ("-start_number", startNum),
-                    ("-framerate", fps),
-                    ("-apply_trc", "iec61966_2_1"),
-                    ("-i", inputpath),
-                    ("-pix_fmt", "yuva420p"),
-                    ("-start_number_out", startNum),
-                ]
-            )
+            args = OrderedDict([
+                ("-start_number", startNum),
+                ("-framerate", fps),
+                ("-apply_trc", "iec61966_2_1"),
+                ("-i", quoted_inputpath),
+                ("-pix_fmt", "yuva420p"),
+                ("-start_number_out", startNum),
+            ])
 
             if startNum is None:
                 args.popitem(last=False)
                 args.popitem(last=True)
 
         if outputExt == ".jpg":
-            quality = self.core.getConfig(
-                "media", "jpgCompression", dft=4, config="project"
-            )
+            quality = self.core.getConfig("media", "jpgCompression", dft=4, config="project")
             args["-qscale:v"] = str(quality)
 
         if outputExt == ".mp4":
-            quality = self.core.getConfig(
-                "media", "mp4Compression", dft=18, config="project"
-            )
+            quality = self.core.getConfig("media", "mp4Compression", dft=18, config="project")
             args["-crf"] = str(quality)
 
+        if outputExt == ".exr":
+            args["-compression"] = "zip" 
+            args["-pix_fmt"] = "rgba64le"
+            
         if settings:
             args.update(settings)
 
@@ -557,10 +537,15 @@ class MediaManager(object):
 
             argList += al
 
-        argList += [outputpath, "-y"]
+        argList += [quoted_outputpath, "-y"]
         logger.debug("Run ffmpeg with this settings: " + str(argList))
+        
+        # Usar shell=False y pasar la lista directamente (evita problemas con espacios)
         nProc = subprocess.Popen(
-            " ".join(argList), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
+            argList,  # Pasamos la lista directamente (sin " ".join)
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            shell=False  # Importante para evitar problemas con espacios
         )
         result = nProc.communicate()
 
@@ -699,10 +684,7 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            try:
-                os.makedirs(os.path.dirname(outputPath))
-            except FileExistsError:
-                pass
+            os.makedirs(os.path.dirname(outputPath))
 
         outputPath = outputPath.replace("\\", "/")
 
@@ -773,10 +755,7 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            try:
-                os.makedirs(os.path.dirname(outputPath))
-            except FileExistsError:
-                pass
+            os.makedirs(os.path.dirname(outputPath))
 
         outputPath = outputPath.replace("\\", "/")
         start = end = 1
@@ -1010,6 +989,7 @@ nuke.execute(write, %s, %s)
                 break
             else:
                 try:
+                    # Añadir permisos explícitos para macOS/Unix (755: owner rwx, group/others rx)
                     os.makedirs(os.path.dirname(path), mode=0o755)
                     break
                 except FileExistsError:
@@ -1020,29 +1000,13 @@ nuke.execute(write, %s, %s)
                     if result != "Retry":
                         return
 
+        # Guardar la imagen según el sistema operativo
         if platform.system() == "Windows":
             if os.path.splitext(path)[1].lower() == ".png":
                 pmap.save(path, "PNG", 95)
             else:
                 pmap.save(path, "JPG", 95)
-
-        else:
-            try:
-                img = pmap.toImage()
-                buf = QBuffer()
-                buf.open(QIODevice.ReadWrite)
-                img.save(buf, "PNG")
-
-                strio = StringIO()
-                strio.write(buf.data())
-                buf.close()
-                strio.seek(0)
-                pimg = Image.open(strio)
-                pimg.save(path)
-            except:
-                pmap.save(path, "JPG")
-
-        if platform.system() == "Darwin":
+        else:  # macOS/Linux
             try:
                 # Método 1: Usar Qt directamente (más eficiente si funciona)
                 if os.path.splitext(path)[1].lower() == ".png":
