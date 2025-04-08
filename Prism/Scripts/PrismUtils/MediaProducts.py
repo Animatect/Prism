@@ -975,19 +975,16 @@ class MediaProducts(object):
             logger.warning("Empty path provided")
             return None
         
-        # Normalizar la ruta de entrada (convertir a formato universal)
         nPath = os.path.normpath(path).replace("\\", "/")
         
         validLocs = []
         
         for location in locDict:
-            if not locDict[location]:  # Skip empty locations
+            if not locDict[location]: 
                 continue
                 
-            # Normalizar la ruta base (convertir a formato universal)
             basePath = os.path.normpath(locDict[location]).replace("\\", "/")
             
-            # Comparación insensible a mayúsculas/minúsculas para macOS
             if platform.system() == "Darwin":
                 if nPath.lower().startswith(basePath.lower()):
                     validLocs.append(location)

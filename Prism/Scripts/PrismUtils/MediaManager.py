@@ -90,9 +90,8 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
-            ".MOV",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".MOV"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -540,12 +539,11 @@ class MediaManager(object):
         argList += [quoted_outputpath, "-y"]
         logger.debug("Run ffmpeg with this settings: " + str(argList))
         
-        # Usar shell=False y pasar la lista directamente (evita problemas con espacios)
         nProc = subprocess.Popen(
-            argList,  # Pasamos la lista directamente (sin " ".join)
+            argList, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
-            shell=False  # Importante para evitar problemas con espacios
+            shell=False  
         )
         result = nProc.communicate()
 
@@ -684,7 +682,10 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            os.makedirs(os.path.dirname(outputPath))
+            try:
+                os.makedirs(os.path.dirname(outputPath))
+            except FileExistsError:
+                pass
 
         outputPath = outputPath.replace("\\", "/")
 
@@ -755,7 +756,10 @@ class MediaManager(object):
             cleanTemp = True
 
         if not os.path.exists(os.path.dirname(outputPath)):
-            os.makedirs(os.path.dirname(outputPath))
+            try:
+                os.makedirs(os.path.dirname(outputPath))
+            except FileExistsError:
+                pass
 
         outputPath = outputPath.replace("\\", "/")
         start = end = 1
@@ -989,7 +993,6 @@ nuke.execute(write, %s, %s)
                 break
             else:
                 try:
-                    # Añadir permisos explícitos para macOS/Unix (755: owner rwx, group/others rx)
                     os.makedirs(os.path.dirname(path), mode=0o755)
                     break
                 except FileExistsError:
@@ -1000,21 +1003,18 @@ nuke.execute(write, %s, %s)
                     if result != "Retry":
                         return
 
-        # Guardar la imagen según el sistema operativo
         if platform.system() == "Windows":
             if os.path.splitext(path)[1].lower() == ".png":
                 pmap.save(path, "PNG", 95)
             else:
                 pmap.save(path, "JPG", 95)
-        else:  # macOS/Linux
+        else:
             try:
-                # Método 1: Usar Qt directamente (más eficiente si funciona)
                 if os.path.splitext(path)[1].lower() == ".png":
                     pmap.save(path, "PNG", 95)
                 else:
                     pmap.save(path, "JPG", 95)
             except:
-                # Método 2: Usar PIL/Pillow como fallback (para casos especiales)
                 try:
                     from PIL import Image
                     import io
@@ -1025,7 +1025,6 @@ nuke.execute(write, %s, %s)
                         f.write(buffer.getvalue())
                 except Exception as e:
                     logger.warning(f"Failed to save pixmap on macOS/Linux: {str(e)}")
-                    # Último fallback: intentar guardar con Qt sin especificar calidad
                     pmap.save(path)
 
     @err_catcher(name=__name__)
