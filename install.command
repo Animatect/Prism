@@ -1,82 +1,74 @@
 #!/bin/bash
 
 # --- Configuración ---
-PRISM_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/Prism" && pwd )"
-PYTHON_BIN="/usr/bin/python3"  # Python del sistema (cambia a "$PRISM_DIR/Python311/python" para usar el de Prism)
-PYTHON_SCRIPT="$PRISM_DIR/Scripts/PrismInstaller.py"
+APP_NAME="Prism"
+VERSION="2.0.16"
+APP_DIR="/Applications/${APP_NAME}.app"
+CONTENTS_DIR="${APP_DIR}/Contents"
+RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
-# --- Verificar si el script existe ---
-if [ ! -f "$PYTHON_SCRIPT" ]; then
-    echo "❌ Error: No se encontró PrismInstaller.py en: $PYTHON_SCRIPT"
-    echo "Asegúrate de que el archivo .command esté en la misma carpeta que 'Prism'."
+# --- 1. Verificar estructura del proyecto ---
+if [ ! -f "Scripts/PrismTray.py" ]; then
+    echo "❌ Error: El archivo Scripts/PrismTray.py no existe"
+    echo "Ejecuta este script desde la raíz del proyecto donde están las carpetas Plugins, Scripts, etc."
     exit 1
 fi
+ 
+# --- 2. Limpiar instalación previa ---
+rm -rf "${APP_DIR}"
 
-# --- Función para instalar PySide6 ---
-install_pyside6() {
-    echo "🔧 Instalando PySide6 (timeout extendido)..."
-    echo "Esto puede tomar varios minutos dependiendo de tu conexión..."
-    
-    # Primero actualizar pip para evitar problemas
-    "$PYTHON_BIN" -m pip install --upgrade pip --default-timeout=60 --user
-    
-    # Luego instalar PySide6
-    "$PYTHON_BIN" -m pip install --default-timeout=60 --user PySide6
-    
-    if [ $? -ne 0 ]; then
-        echo "❌ Error: Falló la instalación automática. Prueba esto:"
-        echo "   1. Actualiza pip manualmente: '$PYTHON_BIN -m pip install --upgrade pip'"
-        echo "   2. Instala PySide6 manualmente: '$PYTHON_BIN -m pip install --user PySide6'"
-        echo "   3. Verifica tu conexión a internet"
-        exit 1
+# --- 3. Crear estructura de directorios ---
+mkdir -p "${CONTENTS_DIR}/MacOS"
+mkdir -p "${RESOURCES_DIR}"
+
+# --- 4. Copiar TODOS los componentes ---
+echo "Copiando archivos a la aplicación..."
+components=("Plugins" "Presets" "Python311" "PythonLibs" "Scripts" "Tools")
+for component in "${components[@]}"; do
+    if [ -d "$component" ]; then
+        cp -R "$component" "${RESOURCES_DIR}/"
+        echo "✓ $component"
+    else
+        echo "⚠️ $component no encontrado (se omitió)"
     fi
-    echo "✅ PySide6 instalado correctamente."
-}
+done
 
-# --- Función para instalar psutil ---
-install_psutil() {
-    echo "🔧 Instalando psutil..."
-    "$PYTHON_BIN" -m pip install --user psutil
-    
-    if [ $? -ne 0 ]; then
-        echo "❌ Error: Falló la instalación de psutil. Prueba esto:"
-        echo "   1. Verifica tu conexión a internet"
-        echo "   2. Intenta instalarlo manualmente: '$PYTHON_BIN -m pip install --user psutil'"
-        exit 1
-    fi
-    echo "✅ psutil instalado correctamente."
-}
+# Copiar archivos adicionales
+cp -v license_*.txt "${RESOURCES_DIR}/"
 
-# --- Verificar dependencias de Python ---
-echo "🔍 Verificando dependencias de Python..."
+# --- 5. Crear ejecutable principal ---
+cat > "${CONTENTS_DIR}/MacOS/${APP_NAME}" <<EOF
+#!/bin/bash
+DIR=\$(dirname "\$0")
+/usr/bin/python3 "\$DIR/../Resources/Scripts/PrismTray.py"
+EOF
+chmod +x "${CONTENTS_DIR}/MacOS/${APP_NAME}"
 
-# Verificar PySide6
-"$PYTHON_BIN" -c "import PySide6" 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "⚠️ PySide6 no está instalado."
-    install_pyside6
-else
-    echo "✅ PySide6 ya está instalado."
-fi
+# --- 6. Crear Info.plist ---
+cat > "${CONTENTS_DIR}/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>${APP_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.prism.${APP_NAME}</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleName</key>
+    <string>${APP_NAME}</string>
+</dict>
+</plist>
+EOF
 
-# Verificar psutil
-"$PYTHON_BIN" -c "import psutil" 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "⚠️ psutil no está instalado."
-    install_psutil
-else
-    echo "✅ psutil ya está instalado."
-fi
+# --- 7. Reparar permisos ---
+find "${APP_DIR}" -type d -exec chmod 755 {} \;
+find "${APP_DIR}" -type f -exec chmod 644 {} \;
+chmod +x "${CONTENTS_DIR}/MacOS/${APP_NAME}"
 
-# --- Ejecutar PrismInstaller.py ---
-echo ""
-echo "🚀 Iniciando Prism..."
-echo "Directorio de Prism: $PRISM_DIR"
-echo "Python usado: $PYTHON_BIN"
-echo ""
+# --- 8. Firma temporal (para desarrollo) ---
+codesign --force --deep --sign - "${APP_DIR}"
 
-"$PYTHON_BIN" "$PYTHON_SCRIPT"
-
-# --- Mantener la terminal abierta ---
-echo ""
-read -p "Presiona Enter para cerrar esta ventana..." dummy
+echo "✅ ${APP_NAME} ${VERSION} instalado correctamente en:"
+echo "   ${APP_DIR}"

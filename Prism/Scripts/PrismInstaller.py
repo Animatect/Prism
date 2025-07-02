@@ -77,7 +77,7 @@ def create_mac_shortcut():
             return False
 
         # Nombre del acceso directo
-        shortcut_name = "Prism 2.0.16"
+        shortcut_name = "Prism Project Browser"
         
         # Ruta de destino en el escritorio
         desktop_path = str(Path.home() / "Desktop")
@@ -95,24 +95,6 @@ def create_mac_shortcut():
                 f.write(f"'{sys.executable}' '{tray_script}'\n")
             
             os.chmod(shortcut_path, 0o755)
-
-            icon_path = os.path.join(prism_root, "UserInterfacesPrism", "p_tray.png")
-        
-            if not os.path.exists(icon_path):
-                print(f"Advertencia: No se encontró el icono en {icon_path}")
-                return True  # Continuar sin icono si no existe
-            
-            # Comando AppleScript para cambiar el icono
-            applescript = f'''
-            tell application "Finder"
-                set theFile to POSIX file "{shortcut_path}" as alias
-                set theIcon to POSIX file "{icon_path}" as alias
-                copy theIcon to icon of theFile
-            end tell
-            '''
-            
-            # Ejecutar AppleScript
-            subprocess.run(['osascript', '-e', applescript], check=True)
             
             print(f"Acceso directo creado exitosamente en: {shortcut_path}")
             return True
@@ -403,8 +385,9 @@ class Page_Finished(QWidget):
 
     def launchPrism(self):
         target = self.parent.core.prismRoot
+        exe = os.path.join(target, self.parent.core.pythonVersion, "Prism.exe")
         script = os.path.join(target, "Scripts", "PrismTray.py")
-        subprocess.Popen([sys.executable, script, "projectBrowser"])
+        subprocess.Popen([exe, script, "projectBrowser"])
 
     def entered(self):
         if not self.parent.w_pageStart.chb_integrations.isChecked():
