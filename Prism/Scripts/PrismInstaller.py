@@ -37,8 +37,6 @@ import sys
 import shutil
 import platform
 import subprocess
-from pathlib import Path
-
 
 prismRoot = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 scriptPath = os.path.join(prismRoot, "Scripts")
@@ -66,59 +64,6 @@ from qtpy.QtWidgets import *
 
 from PrismUtils.Decorators import err_catcher
 from UserInterfacesPrism import PrismInstaller_ui
-
-def create_mac_shortcut():
-        # Ruta al archivo PrismTray.py
-        prism_root = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-        tray_script = os.path.join(prism_root, "Scripts", "PrismTray.py")
-        
-        if not os.path.exists(tray_script):
-            print(f"Error: No se encontró el archivo PrismTray.py en {tray_script}")
-            return False
-
-        # Nombre del acceso directo
-        shortcut_name = "Prism 2.0.16"
-        
-        # Ruta de destino en el escritorio
-        desktop_path = str(Path.home() / "Desktop")
-        shortcut_path = os.path.join(desktop_path, shortcut_name + ".command")
-        
-        # Verificar si el acceso directo ya existe
-        if os.path.exists(shortcut_path):
-            print(f"El acceso directo ya existe en: {shortcut_path}")
-            return True
-        
-        try:
-            with open(shortcut_path, 'w') as f:
-                f.write("#!/bin/bash\n")
-                f.write(f"cd '{prism_root}'\n")
-                f.write(f"'{sys.executable}' '{tray_script}'\n")
-            
-            os.chmod(shortcut_path, 0o755)
-
-            icon_path = os.path.join(prism_root, "UserInterfacesPrism", "p_tray.png")
-        
-            if not os.path.exists(icon_path):
-                print(f"Advertencia: No se encontró el icono en {icon_path}")
-                return True  # Continuar sin icono si no existe
-            
-            # Comando AppleScript para cambiar el icono
-            applescript = f'''
-            tell application "Finder"
-                set theFile to POSIX file "{shortcut_path}" as alias
-                set theIcon to POSIX file "{icon_path}" as alias
-                copy theIcon to icon of theFile
-            end tell
-            '''
-            
-            # Ejecutar AppleScript
-            subprocess.run(['osascript', '-e', applescript], check=True)
-            
-            print(f"Acceso directo creado exitosamente en: {shortcut_path}")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"Error al crear el acceso directo: {e}")
-            return False
 
 
 class PrismSetup(QDialog):
@@ -403,8 +348,9 @@ class Page_Finished(QWidget):
 
     def launchPrism(self):
         target = self.parent.core.prismRoot
+        exe = os.path.join(target, self.parent.core.pythonVersion, "Prism.exe")
         script = os.path.join(target, "Scripts", "PrismTray.py")
-        subprocess.Popen([sys.executable, script, "projectBrowser"])
+        subprocess.Popen([exe, script, "projectBrowser"])
 
     def entered(self):
         if not self.parent.w_pageStart.chb_integrations.isChecked():
@@ -412,9 +358,6 @@ class Page_Finished(QWidget):
 
         msg = "Prism %s was installed successfully!" % self.parent.core.version
         self.l_success.setText(msg)
-
-        if platform.system() == "Darwin":
-            create_mac_shortcut()
 
 
 class PrismInstaller(QDialog, PrismInstaller_ui.Ui_dlg_installer):

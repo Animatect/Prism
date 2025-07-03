@@ -1970,6 +1970,7 @@ License: GNU LGPL-3.0-or-later<br>
                 detailData.update(pathdata)
 
             detailData["comment"] = comment
+
             if "user" in detailData:
                 del detailData["user"]
             if "username" in detailData:

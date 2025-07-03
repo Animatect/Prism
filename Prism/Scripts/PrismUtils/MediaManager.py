@@ -41,7 +41,6 @@ import traceback
 import glob
 import re
 import time
-import shlex
 
 from collections import OrderedDict
 
@@ -90,8 +89,9 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
+            ".MOV",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".MOV"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -278,39 +278,21 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def getVideoReader(self, filepath):
-        if not os.path.exists(filepath):
-            return "Error - file does not exist: %s" % filepath
-            
         if os.stat(filepath).st_size == 0:
-            return "Error - empty file: %s" % filepath
-
-        try:
-            filepath = str(filepath)
-    
-            if platform.system() == "Darwin":
-                filepath = os.path.abspath(filepath)
-                filepath = filepath.replace("\\", "/")
-                
+            reader = "Error - empty file: %s" % filepath
+        else:
             imageio = self.getImageIO()
-            if imageio is None:
-                return "Error - imageio not initialized (try installing ffmpeg?)"
-                
-            backends = ["ffmpeg", "libav"]
-            last_error = None
-            
-            for backend in backends:
-                try:
-                    reader = imageio.get_reader(filepath, backend)
-                    if reader is not None:
-                        return reader
-                except Exception as e:
-                    last_error = str(e)
-            
-            return f"Error - All backends failed: {last_error}"
-                    
-        except Exception as e:
-            return f"Error - Unexpected error: {str(e)}"
-    
+            filepath = str(filepath)  # unicode causes errors in Python 2
+            if platform.system() == "Windows":
+                filepath = filepath.lower()
+
+            try:
+                reader = imageio.get_reader(filepath, "ffmpeg")
+            except Exception as e:
+                reader = "Error - %s" % e
+
+        return reader
+
     @err_catcher(name=__name__)
     def checkMSVC(self):
         if platform.system() != "Windows":
@@ -378,10 +360,7 @@ class MediaManager(object):
             ffmpegPath = "ffmpeg"
 
         elif platform.system() == "Darwin":
-            local_path =  os.path.join(
-                self.core.prismLibs, "Tools", "FFmpeg", "bin", "ffmpeg"
-            )
-            ffmpegPath = local_path if os.path.exists(local_path) else "ffmpeg"
+            ffmpegPath = "ffmpeg"
 
         if validate:
             result = self.validateFFmpeg(ffmpegPath)
@@ -394,33 +373,22 @@ class MediaManager(object):
     def validateFFmpeg(self, path):
         ffmpegIsInstalled = False
 
-        try:
-            if platform.system() == "Windows":
-                if os.path.exists(path):
-                    ffmpegIsInstalled = True
-            elif platform.system() in ["Linux", "Darwin"]:
-                # Verificar si es un comando del sistema o una ruta local
-                if path == "ffmpeg":
-                    # Verificar si está en el PATH
-                    result = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
-                    ffmpegIsInstalled = result.returncode == 0
-                else:
-                    # Verificar ruta local
-                    if os.path.exists(path):
-                        if platform.system() == "Darwin":
-                            # Verificar permisos de ejecución en macOS
-                            if not os.access(path, os.X_OK):
-                                try:
-                                    os.chmod(path, 0o755)  # Intentar dar permisos
-                                except:
-                                    pass
-                        # Probar ejecución
-                        test_cmd = [path, "-version"] if platform.system() == "Darwin" else [path]
-                        result = subprocess.run(test_cmd, capture_output=True)
-                        ffmpegIsInstalled = result.returncode == 0
-        except Exception as e:
-            logger.debug(f"Error validating FFmpeg: {str(e)}")
-            pass
+        if platform.system() == "Windows":
+            if os.path.exists(path):
+                ffmpegIsInstalled = True
+        elif platform.system() == "Linux":
+            try:
+                subprocess.Popen([path], shell=True)
+                ffmpegIsInstalled = True
+            except:
+                pass
+
+        elif platform.system() == "Darwin":
+            try:
+                subprocess.Popen([path], shell=True)
+                ffmpegIsInstalled = True
+            except:
+                pass
 
         return ffmpegIsInstalled
 
@@ -440,29 +408,11 @@ class MediaManager(object):
 
     @err_catcher(name=__name__)
     def convertMedia(self, inputpath, startNum, outputpath, settings=None):
-        # Limpiar rutas (remover comillas existentes y normalizar barras)
-        clean_inputpath = inputpath.replace("\\", "/").strip('"\'')
-        clean_outputpath = outputpath.replace("\\", "/").strip('"\'')
+        inputpath = os.path.normpath(inputpath.replace("\\", "/"))
+        outputpath = os.path.normpath(outputpath.replace("\\", "/"))
 
-        if not os.path.exists(clean_inputpath):
-            print(f"[ERROR] Input file not found: {clean_inputpath}")
-            return None
-        
-        output_dir = os.path.dirname(clean_outputpath)
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-            print(f"[DEBUG] Directorio de salida creado: {output_dir}")
-        except Exception as e:
-            print(f"[ERROR] No se pudo crear el directorio {output_dir}: {e}")
-            return None
-
-        print("[DEBUG] Input path:", clean_inputpath)
-        print("[DEBUG] Output path:", clean_outputpath)
-        print("[DEBUG] ¿Existe el input?", os.path.exists(clean_inputpath))
-        print("[DEBUG] ¿Directorio de salida existe?", os.path.exists(output_dir))
-
-        inputExt = os.path.splitext(clean_inputpath)[1].lower()
-        outputExt = os.path.splitext(clean_outputpath)[1].lower()
+        inputExt = os.path.splitext(inputpath)[1].lower()
+        outputExt = os.path.splitext(outputpath)[1].lower()
         videoInput = inputExt in [".mp4", ".mov", ".m4v"]
         startNum = str(startNum) if startNum is not None else None
 
@@ -470,52 +420,68 @@ class MediaManager(object):
 
         if not ffmpegPath:
             msg = "Could not find ffmpeg"
-            if platform.system() == "Darwin":
-                msg += '\n\nYou can install it with this command:\n"brew install ffmpeg"'
             self.core.popup(msg, severity="critical")
             return
-
-        # Asegurar que las rutas estén entre comillas para ffmpeg
-        quoted_inputpath = f'"{clean_inputpath}"'
-        quoted_outputpath = f'"{clean_outputpath}"'
+        
+        if not os.path.exists(os.path.dirname(outputpath)):
+            try:
+                os.makedirs(os.path.dirname(outputpath), exist_ok=True)
+                if platform.system() == "Darwin":
+                    os.chmod(os.path.dirname(outputpath), 0o755)
+            except FileExistsError:
+                pass
 
         if videoInput:
-            args = OrderedDict([
-                ("-apply_trc", "iec61966_2_1"),
-                ("-i", quoted_inputpath),
-                ("-pix_fmt", "yuva420p"),
-                ("-start_number", startNum),
-            ])
+            args = OrderedDict(
+                [
+                    ("-apply_trc", "iec61966_2_1"),
+                    ("-i", inputpath),
+                    ("-pix_fmt", "yuva420p"),
+                    ("-start_number", startNum),
+                ]
+            )
+
         else:
             fps = "25"
-            if self.core.getConfig("globals", "forcefps", configPath=self.core.prismIni):
-                fps = self.core.getConfig("globals", "fps", configPath=self.core.prismIni)
+            if self.core.getConfig(
+                "globals", "forcefps", configPath=self.core.prismIni
+            ):
+                fps = self.core.getConfig(
+                    "globals", "fps", configPath=self.core.prismIni
+                )
 
-            args = OrderedDict([
-                ("-start_number", startNum),
-                ("-framerate", fps),
-                ("-apply_trc", "iec61966_2_1"),
-                ("-i", quoted_inputpath),
-                ("-pix_fmt", "yuva420p"),
-                ("-start_number_out", startNum),
-            ])
+            args = OrderedDict(
+                [
+                    ("-start_number", startNum),
+                    ("-framerate", fps),
+                    ("-apply_trc", "iec61966_2_1"),
+                    ("-i", inputpath),
+                    ("-pix_fmt", "yuva420p"),
+                    ("-start_number_out", startNum),
+                ]
+            )
 
             if startNum is None:
                 args.popitem(last=False)
                 args.popitem(last=True)
 
         if outputExt == ".jpg":
-            quality = self.core.getConfig("media", "jpgCompression", dft=4, config="project")
+            quality = self.core.getConfig(
+                "media", "jpgCompression", dft=4, config="project"
+            )
             args["-qscale:v"] = str(quality)
 
         if outputExt == ".mp4":
-            quality = self.core.getConfig("media", "mp4Compression", dft=18, config="project")
+            quality = self.core.getConfig(
+                "media", "mp4Compression", dft=18, config="project"
+            )
             args["-crf"] = str(quality)
 
-        if outputExt == ".exr":
-            args["-compression"] = "zip" 
-            args["-pix_fmt"] = "rgba64le"
-            
+        if outputExt == ".mov" and platform.system() == "Darwin":
+            args["-c:v"] = "prores_ks"
+            args["-profile:v"] = "3" 
+            args["-vendor"] = "apl0"  
+
         if settings:
             args.update(settings)
 
@@ -536,14 +502,10 @@ class MediaManager(object):
 
             argList += al
 
-        argList += [quoted_outputpath, "-y"]
+        argList += [outputpath, "-y"]
         logger.debug("Run ffmpeg with this settings: " + str(argList))
-        
         nProc = subprocess.Popen(
-            argList, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE,
-            shell=False  
+            argList, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
         )
         result = nProc.communicate()
 
@@ -993,12 +955,12 @@ nuke.execute(write, %s, %s)
                 break
             else:
                 try:
-                    os.makedirs(os.path.dirname(path), mode=0o755)
+                    os.makedirs(os.path.dirname(path))
                     break
                 except FileExistsError:
                     break
-                except Exception as e:
-                    msg = "Failed to create folder. Make sure you have the required permissions to create this folder.\n\n%s\n\nError: %s" % (os.path.dirname(path), str(e))
+                except:
+                    msg = "Failed to create folder. Make sure you have the required permissions to create this folder.\n\n%s" % os.path.dirname(path)
                     result = self.core.popupQuestion(msg, buttons=["Retry", "Cancel"])
                     if result != "Retry":
                         return
@@ -1008,24 +970,37 @@ nuke.execute(write, %s, %s)
                 pmap.save(path, "PNG", 95)
             else:
                 pmap.save(path, "JPG", 95)
-        else:
+        elif platform.system() == "Darwin":  # macOS específico
             try:
-                if os.path.splitext(path)[1].lower() == ".png":
-                    pmap.save(path, "PNG", 95)
+                # Método directo para macOS que evita conversiones innecesarias
+                ext = os.path.splitext(path)[1].lower()
+                if ext == '.png':
+                    pmap.save(path, "PNG")
+                elif ext == '.jpg' or ext == '.jpeg':
+                    # Calidad ajustada para macOS (usando 90 como estándar)
+                    pmap.save(path, "JPEG", quality=90)
                 else:
-                    pmap.save(path, "JPG", 95)
+                    # Formato por defecto para otros tipos
+                    pmap.save(path, "PNG")
+            except Exception as e:
+                print(f"Error al guardar imagen en macOS: {str(e)}")
+                # Fallback seguro
+                pmap.save(path, "PNG")
+        else:  # Otros sistemas (Linux, etc.)
+            try:
+                img = pmap.toImage()
+                buf = QBuffer()
+                buf.open(QIODevice.ReadWrite)
+                img.save(buf, "PNG")
+
+                strio = StringIO()
+                strio.write(buf.data())
+                buf.close()
+                strio.seek(0)
+                pimg = Image.open(strio)
+                pimg.save(path)
             except:
-                try:
-                    from PIL import Image
-                    import io
-                    img = pmap.toImage()
-                    buffer = io.BytesIO()
-                    img.save(buffer, "PNG" if path.lower().endswith(".png") else "JPEG")
-                    with open(path, "wb") as f:
-                        f.write(buffer.getvalue())
-                except Exception as e:
-                    logger.warning(f"Failed to save pixmap on macOS/Linux: {str(e)}")
-                    pmap.save(path)
+                pmap.save(path, "JPG")
 
     @err_catcher(name=__name__)
     def getPixmapFromUrl(self, url):
@@ -1244,7 +1219,7 @@ nuke.execute(write, %s, %s)
 
             path = paths[0]
 
-        comd = [progPath, path.replace(" ", "\\")]
+        comd = [progPath, path]
         logger.debug("opening media: %s" % comd)
         with open(os.devnull, "w") as f:
             try:
@@ -1271,12 +1246,9 @@ nuke.execute(write, %s, %s)
             )
         else:
             base = self.core.projects.getPreset("Default")["path"]
-            if platform.system() == "Darwin":
-                imgFile = os.path.join(base, "00_Pipeline/Fallbacks", filename)
-            else:
-                imgFile = os.path.join(
-                    base, "00_Pipeline/Fallbacks/" + filename
-                )
+            imgFile = os.path.join(
+                base, "00_Pipeline/Fallbacks/" + filename
+            )
 
         pmap = self.core.media.getPixmapFromPath(imgFile)
         if not pmap:

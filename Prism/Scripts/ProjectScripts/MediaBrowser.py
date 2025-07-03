@@ -39,7 +39,6 @@ import logging
 import traceback
 from collections import OrderedDict
 import shutil
-from pathlib import Path
 
 prismRoot = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -3240,166 +3239,97 @@ class MediaPlayer(QWidget):
                 dlut = os.path.join(lutPath, os.listdir(lutPath)[0])
 
         return dlut
-    
+
     @err_catcher(name=__name__)
     def convertImgs(self, extension, checkRes=True, settings=None):
-        import os
-        import subprocess
-        import shlex
-        from pathlib import Path
-        import re
-        from collections import OrderedDict
-        import logging
+        if not extension:
+            if settings:
+                extension = settings.get("extension")
 
-        # Configuración inicial
-        logger = logging.getLogger(__name__)
+            if not extension:
+                logger.warning("No extension specified")
+                return
 
-        # Función para limpieza profunda de rutas
-        def sanitize_path(path, is_output=False, ext=None):
-            try:
-                # Convertir a Path y resolver completamente
-                path_obj = Path(path).expanduser().resolve()
-                
-                # Limpieza de nombre de archivo
-                stem = path_obj.stem
-                if is_output and ext:
-                    # Remover la extensión si ya está presente
-                    stem = re.sub(r'{}$'.format(re.escape(ext)), '', stem)
-                
-                # Reemplazar caracteres problemáticos
-                clean_stem = re.sub(r'[()\s]', '_', stem)
-                clean_stem = re.sub(r'_+', '_', clean_stem)  # Múltiples _ por uno
-                clean_stem = re.sub(r'\.+', '.', clean_stem)  # Múltiples . por uno
-                
-                # Reconstruir nombre de archivo
-                if ext:
-                    clean_name = f"{clean_stem}{ext}"
-                else:
-                    clean_name = f"{clean_stem}{path_obj.suffix}"
-                
-                # Reconstruir ruta completa
-                return str(path_obj.with_name(clean_name))
-                
-            except Exception as e:
-                logger.error(f"Error sanitizing path: {e}")
-                return str(Path(path).expanduser())
+            settings.pop("extension")
 
-        # Validar y normalizar extensión
-        extension = extension.lower()
-        if not extension.startswith('.'):
-            extension = f".{extension}"
-        
-        # Obtener y validar ruta de entrada
-        inputpath = sanitize_path(self.seq[0])
-        if not Path(inputpath).exists():
-            logger.error(f"Input file not found: {inputpath}")
-            self.core.popup(f"No se encontró el archivo de entrada:\n{inputpath}")
-            return False
+        if extension[0] != ".":
+            extension = "." + extension
 
-        # Configuración de conversión
+        inputpath = self.seq[0].replace("\\", "/")
+        inputExt = os.path.splitext(inputpath)[1]
+
+        if checkRes:
+            if self.pwidth and self.pwidth == "?":
+                self.core.popup("Cannot read media file.")
+                return
+
+            if (
+                extension == ".mp4"
+                and self.pwidth is not None
+                and self.pheight is not None
+                and (
+                    int(self.pwidth) % 2 == 1
+                    or int(self.pheight) % 2 == 1
+                )
+            ):
+                self.core.popup("Media with odd resolution can't be converted to mp4.")
+                return
+
         conversionSettings = settings or OrderedDict()
-        
-        # Configuración especial para formatos específicos
-        if extension == '.mov' and not settings:
-            conversionSettings.update({
-                "-c": "prores",
-                "-profile": "2",
-                "-pix_fmt": "yuv422p10le"
-            })
-        elif extension == '.exr' and not settings:
-            conversionSettings.update({
-                "-compression": "zip",
-                "-pix_fmt": "rgb48le"
-            })
-        elif extension in ('.jpg', '.jpeg') and not settings:
-            conversionSettings["-qscale:v"] = str(self.core.getConfig("media", "jpgCompression", dft=4, config="project"))
-        elif extension == '.png' and not settings:
-            conversionSettings["-compression_level"] = "6"
 
-        # Manejo de secuencia vs imagen única
-        if not self.prvIsSequence:
-            conversionSettings.update({
-                "-frames:v": "1",
-                "-update": "1"
-            })
+        conversionSettings["-loglevel"] = "error"
 
-        # Obtener ruta de salida base
-        context = self.origin.getCurrentAOV() or self.origin.getCurrentVersion()
-        raw_output = self.core.paths.getMediaConversionOutputPath(context, inputpath, extension)
-        if not raw_output:
-            return False
-
-        # Limpieza profunda de la ruta de salida
-        clean_outputpath = sanitize_path(raw_output, is_output=True, ext=extension)
-        
-        # Crear directorios necesarios
-        output_dir = Path(clean_outputpath).parent
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to create directory {output_dir}: {e}")
-            self.core.popup(f"No se pudo crear el directorio de salida:\n{output_dir}")
-            return False
-
-        # Obtener FFmpeg
-        ffmpeg_path = self.core.media.getFFmpeg(validate=True)
-        if not ffmpeg_path:
-            logger.error("FFmpeg not found")
-            self.core.popup("No se encontró FFmpeg instalado")
-            return False
-
-        # Construir comando FFmpeg
-        cmd = [
-            ffmpeg_path,
-            "-y",  # Sobrescribir sin preguntar
-            "-i", f'"{inputpath}"',
-        ]
-        
-        # Añadir parámetros de configuración
-        for key, value in conversionSettings.items():
-            if value is not None:
-                cmd.extend([key, str(value)])
-        
-        cmd.append(f'"{clean_outputpath}"')
-
-        # Ejecutar conversión
-        try:
-            logger.debug(f"Executing FFmpeg: {' '.join(cmd)}")
+        if extension == ".mov" and not settings:
+            conversionSettings["-c"] = "prores"
+            conversionSettings["-profile"] = 2
+            conversionSettings["-pix_fmt"] = "yuv422p10le"
             
-            # Usar shell=True para manejar correctamente las rutas con espacios
-            result = subprocess.run(
-                ' '.join(cmd),
-                shell=True,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                errors='ignore'
+
+        if self.prvIsSequence:
+            inputpath = (
+                os.path.splitext(inputpath)[0][: -self.core.framePadding]
+                + "%04d".replace("4", str(self.core.framePadding))
+                + inputExt
             )
-            
-            # Verificar resultado
-            if not Path(clean_outputpath).exists():
-                error_msg = '\n'.join([line for line in result.stderr.splitlines() if line.strip()][-3:])
-                logger.error(f"FFmpeg failed: {error_msg}")
-                self.core.popup(f"Error en la conversión:\n{error_msg}")
-                return False
-                
-            # Éxito - copiar ruta al portapapeles
-            self.core.copyToClipboard(clean_outputpath, file=True)
-            self.core.popup(f"Conversión exitosa a {extension}\nRuta copiada al portapapeles", severity="info")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = '\n'.join([line for line in e.stderr.splitlines() if line.strip()][-3:])
-            logger.error(f"FFmpeg error: {error_msg}")
-            self.core.popup(f"Error de FFmpeg:\n{error_msg}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            self.core.popup(f"Error inesperado: {str(e)}")
-            return False        
+
+        context = self.origin.getCurrentAOV()
+        if not context:
+            context = self.origin.getCurrentVersion()
+        outputpath = self.core.paths.getMediaConversionOutputPath(
+            context, inputpath, extension
+        )
+
+        if not outputpath:
+            return
+
+        if self.prvIsSequence:
+            startNum = self.pstart
+        else:
+            startNum = 0
+            conversionSettings["-start_number"] = None
+            conversionSettings["-start_number_out"] = None
+
+        result = self.core.media.convertMedia(
+            inputpath, startNum, outputpath, settings=conversionSettings
+        )
+
+        if (
+            extension not in self.core.media.videoFormats
+            and self.prvIsSequence
+        ):
+            outputpath = outputpath % int(startNum)
+
+        self.origin.updateVersions(restoreSelection=True)
+
+        if os.path.exists(outputpath) and os.stat(outputpath).st_size > 0:
+            self.core.copyToClipboard(outputpath, file=True)
+            msg = "The images were converted successfully. (path is in clipboard)"
+            self.core.popup(msg, severity="info")
+        else:
+            msg = "The images could not be converted."
+            logger.debug("expected outputpath: %s" % outputpath)
+            self.core.ffmpegError("Image conversion", msg, result)
+           
 
     @err_catcher(name=__name__)
     def compGetImportSource(self):
@@ -3434,7 +3364,7 @@ class MediaPlayer(QWidget):
         passes = [
             x
             for x in os.listdir(sourceFolder)
-            if x[-5:] not in ["mp4", "jpg", "png"]
+            if x[-5:] not in ["(mp4)", "(jpg)", "(png)"]
             and os.path.isdir(os.path.join(sourceFolder, x))
         ]
         sourceData = []

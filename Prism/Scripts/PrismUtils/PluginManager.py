@@ -53,7 +53,14 @@ class PluginManager(object):
         super(PluginManager, self).__init__()
         self.core = core
         self.monkeyPatchedFunctions = {}
-        self.ignoreAutoLoadPlugins = [name.strip() for name in os.getenv("PRISM_IGNORE_AUTOLOAD_PLUGINS", "").split(",")]
+        env_ignore = os.getenv("PRISM_IGNORE_AUTOLOAD_PLUGINS", "")
+        self.ignoreAutoLoadPlugins = [name.strip() for name in env_ignore.split(",") if name.strip()]
+
+        if sys.platform == 'darwin':
+            self.ignoreAutoLoadPlugins = [name.strip() for name in env_ignore.split(",") if name.strip()]
+        if sys.platform == 'darwin':
+            self.ignoreAutoLoadPlugins.append('PrismInternals')
+            logger.debug("macOS: Ignore plugin PrismInternals")
 
     @err_catcher(name=__name__)
     def initializePlugins(self, appPlugin):

@@ -971,34 +971,16 @@ class MediaProducts(object):
     @err_catcher(name=__name__)
     def getLocationFromPath(self, path):
         locDict = self.core.paths.getRenderProductBasePaths()
-        if not path:
-            logger.warning("Empty path provided")
-            return None
-        
-        nPath = os.path.normpath(path).replace("\\", "/")
-        
+        nPath = os.path.normpath(path)
         validLocs = []
-        
         for location in locDict:
-            if not locDict[location]: 
-                continue
-                
-            basePath = os.path.normpath(locDict[location]).replace("\\", "/")
-            
-            if platform.system() == "Darwin":
-                if nPath.lower().startswith(basePath.lower()):
-                    validLocs.append(location)
-            else:
-                if nPath.startswith(basePath):
-                    validLocs.append(location)
-        
-        validLocs = sorted(validLocs, key=lambda x: len(locDict[x]), reverse=True)
-        
+            if nPath.startswith(locDict[location]):
+                validLocs.append(location)
+
         if not validLocs:
-            logger.warning(f"No valid location found for path: {path}")
-            logger.warning(f"Configured base paths: {locDict}")
-            return validLocs[0]
-        
+            return
+
+        validLocs = sorted(validLocs, key=lambda x: len(locDict[x]), reverse=True)
         return validLocs[0]
 
     @err_catcher(name=__name__)
