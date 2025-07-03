@@ -1,74 +1,60 @@
 #!/bin/bash
 
 # --- Configuración ---
-APP_NAME="Prism"
-VERSION="2.0.16"
-APP_DIR="/Applications/${APP_NAME}.app"
-CONTENTS_DIR="${APP_DIR}/Contents"
-RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+PRISM_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/Prism" && pwd )"
+PYTHON_BIN="/usr/bin/python3"  # Python del sistema (cambia a "$PRISM_DIR/Python311/python" para usar el de Prism)
+PYTHON_SCRIPT="$PRISM_DIR/Scripts/PrismInstaller.py"
+PYTHON_LIBS_DIR="/PythonLibs/Python3"
 
-# --- 1. Verificar estructura del proyecto ---
-if [ ! -f "Scripts/PrismTray.py" ]; then
-    echo "❌ Error: El archivo Scripts/PrismTray.py no existe"
-    echo "Ejecuta este script desde la raíz del proyecto donde están las carpetas Plugins, Scripts, etc."
+# --- Verificar si el script existe ---
+if [ ! -f "$PYTHON_SCRIPT" ]; then
+    echo "❌ Error: No se encontró PrismInstaller.py en: $PYTHON_SCRIPT"
+    echo "Asegúrate de que el archivo .command esté en la misma carpeta que 'Prism'."
     exit 1
 fi
- 
-# --- 2. Limpiar instalación previa ---
-rm -rf "${APP_DIR}"
 
-# --- 3. Crear estructura de directorios ---
-mkdir -p "${CONTENTS_DIR}/MacOS"
-mkdir -p "${RESOURCES_DIR}"
-
-# --- 4. Copiar TODOS los componentes ---
-echo "Copiando archivos a la aplicación..."
-components=("Plugins" "Presets" "Python311" "PythonLibs" "Scripts" "Tools")
-for component in "${components[@]}"; do
-    if [ -d "$component" ]; then
-        cp -R "$component" "${RESOURCES_DIR}/"
-        echo "✓ $component"
+# --- Función para verificar PySide6 ---
+check_pyside6() {
+    local pyside6_path="$PYTHON_LIBS_DIR/PySide6"
+    
+    if [ -d "$pyside6_path" ]; then
+        echo "✅ PySide6 encontrado en: $pyside6_path"
+        return 0
     else
-        echo "⚠️ $component no encontrado (se omitió)"
+        echo "❌ Error: No se encontró PySide6 en: $pyside6_path"
+        echo "Asegúrate de que la biblioteca PySide6 esté en la carpeta PythonLibs/Python3"
+        exit 1
     fi
-done
+}
 
-# Copiar archivos adicionales
-cp -v license_*.txt "${RESOURCES_DIR}/"
+# --- Función para verificar psutil ---
+check_psutil() {
+    local psutil_path="$PYTHON_LIBS_DIR/Psutil"
+    
+    if [ -d "$psutil_path" ]; then
+        echo "✅ psutil encontrado en: $psutil_path"
+        return 0
+    else
+        echo "❌ Error: No se encontró psutil en: $psutil_path"
+        echo "Asegúrate de que la biblioteca psutil esté en la carpeta PythonLibs/Python3"
+        exit 1
+    fi
+}
 
-# --- 5. Crear ejecutable principal ---
-cat > "${CONTENTS_DIR}/MacOS/${APP_NAME}" <<EOF
-#!/bin/bash
-DIR=\$(dirname "\$0")
-/usr/bin/python3 "\$DIR/../Resources/Scripts/PrismTray.py"
-EOF
-chmod +x "${CONTENTS_DIR}/MacOS/${APP_NAME}"
+# --- Verificar dependencias de Python ---
+echo "🔍 Verificando dependencias de Python..."
 
-# --- 6. Crear Info.plist ---
-cat > "${CONTENTS_DIR}/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.prism.${APP_NAME}</string>
-    <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
-    <key>CFBundleName</key>
-    <string>${APP_NAME}</string>
-</dict>
-</plist>
-EOF
+# Verificar PySide6
+check_pyside6
 
-# --- 7. Reparar permisos ---
-find "${APP_DIR}" -type d -exec chmod 755 {} \;
-find "${APP_DIR}" -type f -exec chmod 644 {} \;
-chmod +x "${CONTENTS_DIR}/MacOS/${APP_NAME}"
+# Verificar psutil
+check_psutil
 
-# --- 8. Firma temporal (para desarrollo) ---
-codesign --force --deep --sign - "${APP_DIR}"
+# --- Ejecutar PrismInstaller.py ---
+echo ""
+echo "🚀 Iniciando Prism..."
+echo "Directorio de Prism: $PRISM_DIR"
+echo "Python usado: $PYTHON_BIN"
+echo ""
 
-echo "✅ ${APP_NAME} ${VERSION} instalado correctamente en:"
-echo "   ${APP_DIR}"
+"$PYTHON_BIN" "$PYTHON_SCRIPT"

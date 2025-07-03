@@ -39,7 +39,6 @@ import logging
 import traceback
 from collections import OrderedDict
 import shutil
-from pathlib import Path
 
 prismRoot = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -256,7 +255,7 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
     def getCurrentData(self):
         curIdentifier = self.getCurrentIdentifier()
         if curIdentifier:
-            identifier = curIdentifier["displayName"]
+            identifier = curIdentifier.get("displayName") or ""
         else:
             identifier = ""
 
@@ -274,7 +273,7 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
 
         curSource = self.getCurrentSource()
         if curSource:
-            source = curSource["source"]
+            source = curSource.get("source") or ""
         else:
             source = ""
 
@@ -299,12 +298,29 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         return self.w_entities.getCurrentPage().getCurrentData(returnOne=False)
 
     @err_catcher(name=__name__)
-    def getCurrentIdentifier(self):
+    def getCurrentIdentifier(self, allowMultiple=False):
         items = self.tw_identifier.selectedItems()
+        items = [item for item in items if not (item.data(0, Qt.UserRole) or {}).get("isGroup")]
         if not items:
             return
 
-        return items[0].data(0, Qt.UserRole)
+        if len(items) > 1:
+            datas = []
+            if allowMultiple:
+                for item in items:
+                    data = item.data(0, Qt.UserRole)
+                    if data:
+                        datas.append(data)
+
+                return datas
+            else:
+                return
+        else:
+            data = items[0].data(0, Qt.UserRole)
+            if allowMultiple:
+                return [data]
+            else:
+                return data
 
     @err_catcher(name=__name__)
     def getCurrentVersion(self):
@@ -386,7 +402,10 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                                 items[dep]["tasks"][taskName] = {"item": item}
                                 items[dep]["item"].addChild(item)
 
-                            parent = items[dep]["tasks"][taskName]["item"]
+                            if task["displayName"] in groups:
+                                parent = groupItems[groups[task["displayName"]]]
+                            else:
+                                parent = items[dep]["tasks"][taskName]["item"]
                         else:
                             taskName = task.get("task") or "unknown"
                             if taskName not in items:
@@ -394,15 +413,20 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                                 items[taskName] = {"item": item}
                                 self.tw_identifier.invisibleRootItem().addChild(item)
 
-                            parent = items[taskName]["item"]
+                            if task["displayName"] in groups:
+                                parent = groupItems[groups[task["displayName"]]]
+                            else:
+                                parent = items[taskName]["item"]
 
-                        # if task["displayName"] in addedItems:
-                        #     continue
+                        parChildren = [parent.child(idx).text(0) for idx in range(parent.childCount())]
+                        if task["displayName"] in parChildren:
+                            continue
 
                         item = QTreeWidgetItem([task["displayName"]])
                         item.setData(0, Qt.UserRole, task)
                         parent.addChild(item)
             else:
+                groups, groupItems = self.createGroupItems(mediaTasks)
                 addedItems = []
                 for pType in ["3d", "2d", "playblast", "external"]:
                     for task in sorted(mediaTasks[pType], key=lambda x: x["displayName"]):
@@ -412,7 +436,11 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                         item = QTreeWidgetItem([task["displayName"]])
                         addedItems.append(task["displayName"])
                         item.setData(0, Qt.UserRole, task)
-                        parent = self.tw_identifier.invisibleRootItem()
+                        if task["displayName"] in groups:
+                            parent = groupItems[groups[task["displayName"]]]
+                        else:
+                            parent = self.tw_identifier.invisibleRootItem()
+
                         parent.addChild(item)
 
         if self.tw_identifier.topLevelItemCount() > 0:
@@ -433,6 +461,59 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         if not wasBlocked:
             self.tw_identifier.blockSignals(False)
             self.updateVersions(restoreSelection=True)
+
+
+    @err_catcher(name=__name__)
+    def createGroupItems(self, identifiers):
+        idfs = []
+        for idfType in identifiers:
+            for identifier in identifiers[idfType]:
+                if identifier["displayName"] not in [idf["displayName"] for idf in idfs]:
+                    idfs.append(identifier)
+
+        groups = {}
+        for idf in idfs:
+            identifierName = idf["displayName"]
+            group = self.core.mediaProducts.getGroupFromIdentifier(idf)
+            if group:
+                groups[identifierName] = group
+
+        groupNames = sorted(list(set(groups.values())))
+        groupItems = {}
+        for group in groupNames:
+            gfolders = group.split("/")
+            curPath = ""
+            for gfolder in gfolders:
+                
+                if not gfolder:
+                    continue
+
+                newPath = curPath
+                if newPath:
+                    newPath += "/"
+
+                newPath += gfolder
+                if newPath in groupItems:
+                    curPath = newPath
+                    continue
+
+                item = QTreeWidgetItem([gfolder])
+                item.setData(0, Qt.UserRole, {"isGroup": True})
+                iconPath = os.path.join(
+                    self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                )
+                icon = self.core.media.getColoredIcon(iconPath)
+                item.setIcon(0, icon)
+                if curPath and curPath in groupItems:
+                    parent = groupItems[curPath]
+                else:
+                    parent = self.tw_identifier.invisibleRootItem()
+
+                parent.addChild(item)
+                curPath = newPath
+                groupItems[curPath] = item
+
+        return groups, groupItems
 
     @err_catcher(name=__name__)
     def sortVersions(self, key):
@@ -824,9 +905,11 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
 
         if lw == self.tw_identifier:
             path = None
+            isGroup = False
             if itemName:
                 data = item.data(0, Qt.UserRole)
-                if data:
+                isGroup = data and data.get("isGroup")
+                if data and not isGroup:
                     path = data.get("path")
             
             if not path:
@@ -855,6 +938,25 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                 exAct.triggered.connect(self.ingestMediaDlg)
                 rcmenu.addAction(exAct)
 
+                if isGroup:
+                    depAct = QAction("Ungroup", self)
+                    iconPath = os.path.join(
+                        self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                    )
+                    icon = self.core.media.getColoredIcon(iconPath)
+                    depAct.setIcon(icon)
+                    depAct.triggered.connect(lambda: self.ungroupIdentifiers(itemName))
+                    rcmenu.addAction(depAct)
+                else:
+                    depAct = QAction("Group selected...", self)
+                    iconPath = os.path.join(
+                        self.core.prismRoot, "Scripts", "UserInterfacesPrism", "folder.png"
+                    )
+                    icon = self.core.media.getColoredIcon(iconPath)
+                    depAct.setIcon(icon)
+                    depAct.triggered.connect(self.groupIdentifiersDlg)
+                    rcmenu.addAction(depAct)
+
         elif lw == self.lw_version:
             refresh = self.updateVersions
             identifier = self.getCurrentIdentifier()
@@ -863,10 +965,10 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
                 depAct.triggered.connect(self.createVersionDlg)
                 rcmenu.addAction(depAct)
 
-            if identifier["mediaType"] == "externalMedia":
-                nvAct = QAction("Create new External Version...", self)
-                nvAct.triggered.connect(self.newExternalVersion)
-                rcmenu.addAction(nvAct)
+                if identifier.get("mediaType") == "externalMedia":
+                    nvAct = QAction("Create new External Version...", self)
+                    nvAct.triggered.connect(self.newExternalVersion)
+                    rcmenu.addAction(nvAct)
 
             if item:
                 infAct = QAction("Edit comment...", self)
@@ -1072,6 +1174,19 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
             identifierType=mediaType,
             location=location,
         )
+        selItems = self.tw_identifier.selectedItems()
+        if len(selItems) == 1 and (selItems[0].data(0, Qt.UserRole) or {}).get("isGroup"):
+            item = selItems[0]
+            group = selItems[0].text(0)
+            while item.parent():
+                group = item.parent().text(0) + "/" + group
+                item = item.parent()
+
+            context = curEntity.copy()
+            displayName = self.core.mediaProducts.getDisplayNameForIdentifier(itemName, mediaType)
+            context["displayName"] = displayName
+            self.core.mediaProducts.setIdentifiersGroup([context], group=group)
+
         self.updateTasks()
         if itemName is not None:
             matches = self.tw_identifier.findItems(
@@ -1123,6 +1238,52 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
             )
             if matches:
                 self.lw_version.setCurrentItem(matches[0])
+
+    @err_catcher(name=__name__)
+    def groupIdentifiersDlg(self):
+        identifiers = self.getCurrentIdentifier(allowMultiple=True)
+        groups = [self.core.mediaProducts.getGroupFromIdentifier(identifier) for identifier in identifiers]
+        if len(list(set(groups))) == 1:
+            startText = groups[0]
+        else:
+            startText = ""
+
+        self.newItem = PrismWidgets.CreateItem(
+            core=self.core, showType=False, mode="identifier", startText=startText, valueRequired=False, allowChars="/"
+        )
+        self.newItem.setModal(True)
+        self.core.parentWindow(self.newItem)
+        self.newItem.e_item.setFocus()
+        self.newItem.setWindowTitle("Group selected identifiers")
+        self.newItem.l_item.setText("Group Name:")
+        self.newItem.buttonBox.buttons()[0].setText("Group")
+        self.newItem.accepted.connect(lambda: self.groupIdentifiers(self.newItem, identifiers))
+        self.newItem.chb_projectWide = QCheckBox("Project-Wide")
+        self.newItem.chb_projectWide.setToolTip("Creates this group for all identifiers with the same names for all assets and shots in the current project.")
+        # self.newItem.w_options.layout().addWidget(self.newItem.chb_projectWide)
+        self.newItem.show()
+
+    @err_catcher(name=__name__)
+    def groupIdentifiers(self, dlg, identifiers):
+        group = dlg.e_item.text()
+        projectWide = dlg.chb_projectWide.isChecked()
+        self.core.mediaProducts.setIdentifiersGroup(identifiers, group=group, projectWide=projectWide)
+        self.updateTasks(restoreSelection=True)
+
+    @err_catcher(name=__name__)
+    def ungroupIdentifiers(self, group):
+        identifiers = []
+        mediaTasks = self.getMediaTasks()
+        for idfType in mediaTasks:
+            for identifier in mediaTasks[idfType]:
+                if identifier["displayName"] not in [idf["displayName"] for idf in identifiers]:
+                    igroup = self.core.mediaProducts.getGroupFromIdentifier(identifier)
+                    if igroup == group:
+                        identifiers.append(identifier)
+
+        if identifiers:
+            self.core.mediaProducts.setIdentifiersGroup(identifiers, group=None)
+            self.updateTasks(restoreSelection=True)
 
     @err_catcher(name=__name__)
     def setMaster(self, context):
@@ -1333,16 +1494,23 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
         entity = self.getCurrentEntity()
         identifier = self.getCurrentIdentifier()
         version = self.core.mediaProducts.getLatestVersionFromIdentifier(identifier)
-        startPath = self.core.mediaProducts.getExternalPathFromVersion(version)
-        intVersion = self.core.products.getIntVersionFromVersionName(version["version"])
+        if version:
+            startPath = self.core.mediaProducts.getExternalPathFromVersion(version)
+            intVersion = self.core.products.getIntVersionFromVersionName(version["version"])
+        else:
+            startPath = None
+            intVersion = self.core.lowestVersion
 
         self.ep = ProjectWidgets.IngestMediaDlg(core=self.core, entity=entity, parent=self)
         self.ep.e_identifier.setText(identifier["identifier"])
-        self.ep.setMediaPaths(startPath)
+        if startPath:
+            self.ep.setMediaPaths(startPath)
+
+        self.ep.cb_identifierType.setCurrentText("External")
         self.ep.sp_version.setValue(intVersion)
-        self.ep.enableOk(identifier["identifier"], self.ep.e_identifier)
+        self.ep.enableOk()
         self.ep.setWindowTitle("Create new version")
-        self.ep.e_version.setFocus()
+        self.ep.sp_version.setFocus()
         self.activateWindow()
         self.ep.accepted.connect(self.ingestMedia)
         self.ep.show()
@@ -2472,104 +2640,148 @@ class MediaPlayer(QWidget):
             return
 
         curFrame = self.getCurrentFrame()
-        pmsmall = QPixmap()  # Inicializar con un QPixmap vacío por defecto
+        pmsmall = QPixmap()
+        if (
+            len(self.seq) == 1
+            and os.path.splitext(self.seq[0])[1].lower()
+            in self.core.media.videoFormats
+        ):
+            fileName = self.seq[0]
+        else:
+            fileName = self.seq[curFrame]
 
-        try:
-            if (
-                len(self.seq) == 1
-                and os.path.splitext(self.seq[0])[1].lower()
-                in self.core.media.videoFormats
-            ):
-                fileName = self.seq[0]
-            else:
-                fileName = self.seq[curFrame]
-
-            _, ext = os.path.splitext(fileName)
-            ext = ext.lower()
-
-            if self.state == "disabled":
-                pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
-            else:
-                pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
-                if not pmsmall:
-                    if ext in [".jpg", ".jpeg", ".JPG", ".png", ".PNG", ".tif", ".tiff", ".tga"]:
-                        pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
-                        if pm:
-                            if pm.width() == 0 or pm.height() == 0:
-                                filename = "%s.jpg" % ext[1:].lower()
-                                imgPath = os.path.join(self.core.projects.getFallbackFolder(), filename)
-                                pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                                pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                            elif (pm.width() / float(pm.height())) > 1.7778:
-                                pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
-                            else:
-                                pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
+        _, ext = os.path.splitext(fileName)
+        ext = ext.lower()
+        if self.state == "disabled":
+            pmsmall = self.core.media.scalePixmap(self.emptypmap, self.getThumbnailWidth(), self.getThumbnailHeight())
+        else:
+            pmsmall = QPixmapCache.find(("Frame" + str(curFrame)))
+            if not pmsmall:
+                if ext in [
+                    ".jpg",
+                    ".jpeg",
+                    ".JPG",
+                    ".png",
+                    ".PNG",
+                    ".tif",
+                    ".tiff",
+                    ".tga"
+                ]:
+                    pm = self.core.media.getPixmapFromPath(fileName, self.getThumbnailWidth(), self.getThumbnailHeight(), colorAdjust=True)
+                    if pm:
+                        if pm.width() == 0 or pm.height() == 0:
+                            filename = "%s.jpg" % ext[1:].lower()
+                            imgPath = os.path.join(
+                                self.core.projects.getFallbackFolder(), filename
+                            )
+                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                            pmsmall = self.core.media.scalePixmap(
+                                pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                            )
+                        elif (pm.width() / float(pm.height())) > 1.7778:
+                            pmsmall = pm.scaledToWidth(self.getThumbnailWidth())
                         else:
-                            pmsmall = self.core.media.getPixmapFromPath(os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower()))
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                    elif ext in [".exr", ".dpx", ".hdr"]:
-                        channel = (self.getSelectedContexts() or [{}])[0].get("channel")
-                        try:
-                            pmsmall = self.core.media.getPixmapFromExrPath(
-                                fileName,
-                                self.getThumbnailWidth(),
-                                self.getThumbnailHeight(),
-                                channel=channel,
-                                allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
-                                regenerateThumb=regenerateThumb,
+                            pmsmall = pm.scaledToHeight(self.getThumbnailHeight())
+                    else:
+                        pmsmall = self.core.media.getPixmapFromPath(
+                            os.path.join(
+                                self.core.projects.getFallbackFolder(),
+                                "%s.jpg" % ext[1:].lower(),
                             )
-                            if not pmsmall:
-                                raise RuntimeError("no image loader available")
-                        except Exception as e:
-                            logger.debug(e)
-                            pmsmall = self.core.media.getPixmapFromPath(
-                                os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
+                        )
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                elif ext in [".exr", ".dpx", ".hdr"]:
+                    channel = (self.getSelectedContexts() or [{}])[0].get("channel")
+                    try:
+                        pmsmall = self.core.media.getPixmapFromExrPath(
+                            fileName,
+                            self.getThumbnailWidth(),
+                            self.getThumbnailHeight(),
+                            channel=channel,
+                            allowThumb=self.mediaVersionPlayer.cb_filelayer.currentIndex() == 0,
+                            regenerateThumb=regenerateThumb,
+                        )
+                        if not pmsmall:
+                            raise RuntimeError("no image loader available")
+                    except Exception as e:
+                        logger.debug(e)
+                        pmsmall = self.core.media.getPixmapFromPath(
+                            os.path.join(
+                                self.core.projects.getFallbackFolder(),
+                                "%s.jpg" % ext[1:].lower(),
                             )
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
-                    elif ext in self.core.media.videoFormats:
-                        try:
-                            if len(self.seq) > 1:
-                                imgNum = 0
-                                vidFile = self.core.media.getVideoReader(fileName)
-                            else:
-                                imgNum = curFrame
-                                vidFile = self.vidPrw
-                                if vidFile == "loading":
-                                    if fileName in self.videoReaders:
-                                        vidFile = self.videoReaders[fileName]
-                                    else:
-                                        self.vidPrw = self.core.media.getVideoReader(fileName)
-                                        vidFile = self.vidPrw
-                                        if self.core.isStr(vidFile):
-                                            logger.warning(vidFile)
-                                        self.videoReaders[fileName] = vidFile
+                        )
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                elif ext in self.core.media.videoFormats:
+                    try:
+                        if len(self.seq) > 1:
+                            imgNum = 0
+                            vidFile = self.core.media.getVideoReader(fileName)
+                        else:
+                            imgNum = curFrame
+                            vidFile = self.vidPrw
+                            if vidFile == "loading":
+                                if fileName in self.videoReaders:
+                                    vidFile = self.videoReaders[fileName]
+                                else:
+                                    self.vidPrw = self.core.media.getVideoReader(fileName)
+                                    vidFile = self.vidPrw
+                                    if self.core.isStr(vidFile):
+                                        logger.warning(vidFile)
 
-                            pm = self.core.media.getPixmapFromVideoPath(
+                                    self.videoReaders[fileName] = vidFile
+
+                                if thread:
+                                    data = {"function": "updatePrvInfo", "args": [fileName], "kwargs": {"vidReader": vidFile, "seq": seq}}
+                                    thread.dataSent.emit(data)
+                                else:
+                                    self.updatePrvInfo(fileName, vidReader=vidFile, seq=seq)
+
+                        pm = self.core.media.getPixmapFromVideoPath(
                                 fileName,
                                 videoReader=vidFile,
                                 imgNum=imgNum,
                                 regenerateThumb=regenerateThumb
                             )
-                            pmsmall = self.core.media.scalePixmap(pm, self.getThumbnailWidth(), self.getThumbnailHeight()) or QPixmap()
-                        except Exception as e:
-                            logger.debug(traceback.format_exc())
-                            imgPath = os.path.join(self.core.projects.getFallbackFolder(), "%s.jpg" % ext[1:].lower())
-                            pmsmall = self.core.media.getPixmapFromPath(imgPath)
-                            pmsmall = self.core.media.scalePixmap(pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight())
+                        pmsmall = self.core.media.scalePixmap(
+                            pm, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        ) or QPixmap()
+                    except Exception as e:
+                        logger.debug(traceback.format_exc())
+                        imgPath = os.path.join(
+                            self.core.projects.getFallbackFolder(),
+                            "%s.jpg" % ext[1:].lower(),
+                        )
+                        pmsmall = self.core.media.getPixmapFromPath(imgPath)
+                        pmsmall = self.core.media.scalePixmap(
+                            pmsmall, self.getThumbnailWidth(), self.getThumbnailHeight()
+                        )
+                else:
+                    return False
 
-                    # Solo insertar en la caché si pmsmall es válido
-                    if pmsmall and not pmsmall.isNull():
-                        QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
-                    else:
-                        logger.warning("Failed to load or scale image for frame %s" % curFrame)
-                        pmsmall = self.emptypmap  # Usar una imagen de respaldo
+                if seq is not None:
+                    if self.seq != seq:
+                        logger.debug("exit preview update")
+                        return
 
-        except Exception as e:
-            logger.error("Error in changeImg: %s" % str(e))
-            pmsmall = self.emptypmap  # Usar una imagen de respaldo en caso de error
+                if pmsmall:
+                    QPixmapCache.insert(("Frame" + str(curFrame)), pmsmall)
 
-        # Actualizar la vista previa
-        self.completeChangeImg(pmsmall, curFrame, ext)
+        if not self.prvIsSequence and len(self.seq) > 1:
+            fileName = self.seq[curFrame]
+            if thread:
+                thread.dataSent.emit({"function": "updatePrvInfo", "args": [fileName], "kwargs": {"seq": seq}})
+            else:
+                self.updatePrvInfo(fileName, seq=seq)
+
+        if thread:
+            thread.dataSent.emit({"function": "completeChangeImg", "args": [pmsmall, curFrame, ext], "kwargs": {}})
+        else:
+            self.completeChangeImg(pmsmall, curFrame, ext)
 
     @err_catcher(name=__name__)
     def completeChangeImg(self, pmsmall, curFrame, ext):
@@ -3027,166 +3239,97 @@ class MediaPlayer(QWidget):
                 dlut = os.path.join(lutPath, os.listdir(lutPath)[0])
 
         return dlut
-    
+
     @err_catcher(name=__name__)
     def convertImgs(self, extension, checkRes=True, settings=None):
-        import os
-        import subprocess
-        import shlex
-        from pathlib import Path
-        import re
-        from collections import OrderedDict
-        import logging
+        if not extension:
+            if settings:
+                extension = settings.get("extension")
 
-        # Configuración inicial
-        logger = logging.getLogger(__name__)
+            if not extension:
+                logger.warning("No extension specified")
+                return
 
-        # Función para limpieza profunda de rutas
-        def sanitize_path(path, is_output=False, ext=None):
-            try:
-                # Convertir a Path y resolver completamente
-                path_obj = Path(path).expanduser().resolve()
-                
-                # Limpieza de nombre de archivo
-                stem = path_obj.stem
-                if is_output and ext:
-                    # Remover la extensión si ya está presente
-                    stem = re.sub(r'{}$'.format(re.escape(ext)), '', stem)
-                
-                # Reemplazar caracteres problemáticos
-                clean_stem = re.sub(r'[()\s]', '_', stem)
-                clean_stem = re.sub(r'_+', '_', clean_stem)  # Múltiples _ por uno
-                clean_stem = re.sub(r'\.+', '.', clean_stem)  # Múltiples . por uno
-                
-                # Reconstruir nombre de archivo
-                if ext:
-                    clean_name = f"{clean_stem}{ext}"
-                else:
-                    clean_name = f"{clean_stem}{path_obj.suffix}"
-                
-                # Reconstruir ruta completa
-                return str(path_obj.with_name(clean_name))
-                
-            except Exception as e:
-                logger.error(f"Error sanitizing path: {e}")
-                return str(Path(path).expanduser())
+            settings.pop("extension")
 
-        # Validar y normalizar extensión
-        extension = extension.lower()
-        if not extension.startswith('.'):
-            extension = f".{extension}"
-        
-        # Obtener y validar ruta de entrada
-        inputpath = sanitize_path(self.seq[0])
-        if not Path(inputpath).exists():
-            logger.error(f"Input file not found: {inputpath}")
-            self.core.popup(f"No se encontró el archivo de entrada:\n{inputpath}")
-            return False
+        if extension[0] != ".":
+            extension = "." + extension
 
-        # Configuración de conversión
+        inputpath = self.seq[0].replace("\\", "/")
+        inputExt = os.path.splitext(inputpath)[1]
+
+        if checkRes:
+            if self.pwidth and self.pwidth == "?":
+                self.core.popup("Cannot read media file.")
+                return
+
+            if (
+                extension == ".mp4"
+                and self.pwidth is not None
+                and self.pheight is not None
+                and (
+                    int(self.pwidth) % 2 == 1
+                    or int(self.pheight) % 2 == 1
+                )
+            ):
+                self.core.popup("Media with odd resolution can't be converted to mp4.")
+                return
+
         conversionSettings = settings or OrderedDict()
-        
-        # Configuración especial para formatos específicos
-        if extension == '.mov' and not settings:
-            conversionSettings.update({
-                "-c": "prores",
-                "-profile": "2",
-                "-pix_fmt": "yuv422p10le"
-            })
-        elif extension == '.exr' and not settings:
-            conversionSettings.update({
-                "-compression": "zip",
-                "-pix_fmt": "rgb48le"
-            })
-        elif extension in ('.jpg', '.jpeg') and not settings:
-            conversionSettings["-qscale:v"] = str(self.core.getConfig("media", "jpgCompression", dft=4, config="project"))
-        elif extension == '.png' and not settings:
-            conversionSettings["-compression_level"] = "6"
 
-        # Manejo de secuencia vs imagen única
-        if not self.prvIsSequence:
-            conversionSettings.update({
-                "-frames:v": "1",
-                "-update": "1"
-            })
+        conversionSettings["-loglevel"] = "error"
 
-        # Obtener ruta de salida base
-        context = self.origin.getCurrentAOV() or self.origin.getCurrentVersion()
-        raw_output = self.core.paths.getMediaConversionOutputPath(context, inputpath, extension)
-        if not raw_output:
-            return False
-
-        # Limpieza profunda de la ruta de salida
-        clean_outputpath = sanitize_path(raw_output, is_output=True, ext=extension)
-        
-        # Crear directorios necesarios
-        output_dir = Path(clean_outputpath).parent
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to create directory {output_dir}: {e}")
-            self.core.popup(f"No se pudo crear el directorio de salida:\n{output_dir}")
-            return False
-
-        # Obtener FFmpeg
-        ffmpeg_path = self.core.media.getFFmpeg(validate=True)
-        if not ffmpeg_path:
-            logger.error("FFmpeg not found")
-            self.core.popup("No se encontró FFmpeg instalado")
-            return False
-
-        # Construir comando FFmpeg
-        cmd = [
-            ffmpeg_path,
-            "-y",  # Sobrescribir sin preguntar
-            "-i", f'"{inputpath}"',
-        ]
-        
-        # Añadir parámetros de configuración
-        for key, value in conversionSettings.items():
-            if value is not None:
-                cmd.extend([key, str(value)])
-        
-        cmd.append(f'"{clean_outputpath}"')
-
-        # Ejecutar conversión
-        try:
-            logger.debug(f"Executing FFmpeg: {' '.join(cmd)}")
+        if extension == ".mov" and not settings:
+            conversionSettings["-c"] = "prores"
+            conversionSettings["-profile"] = 2
+            conversionSettings["-pix_fmt"] = "yuv422p10le"
             
-            # Usar shell=True para manejar correctamente las rutas con espacios
-            result = subprocess.run(
-                ' '.join(cmd),
-                shell=True,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                errors='ignore'
+
+        if self.prvIsSequence:
+            inputpath = (
+                os.path.splitext(inputpath)[0][: -self.core.framePadding]
+                + "%04d".replace("4", str(self.core.framePadding))
+                + inputExt
             )
-            
-            # Verificar resultado
-            if not Path(clean_outputpath).exists():
-                error_msg = '\n'.join([line for line in result.stderr.splitlines() if line.strip()][-3:])
-                logger.error(f"FFmpeg failed: {error_msg}")
-                self.core.popup(f"Error en la conversión:\n{error_msg}")
-                return False
-                
-            # Éxito - copiar ruta al portapapeles
-            self.core.copyToClipboard(clean_outputpath, file=True)
-            self.core.popup(f"Conversión exitosa a {extension}\nRuta copiada al portapapeles", severity="info")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = '\n'.join([line for line in e.stderr.splitlines() if line.strip()][-3:])
-            logger.error(f"FFmpeg error: {error_msg}")
-            self.core.popup(f"Error de FFmpeg:\n{error_msg}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            self.core.popup(f"Error inesperado: {str(e)}")
-            return False        
+
+        context = self.origin.getCurrentAOV()
+        if not context:
+            context = self.origin.getCurrentVersion()
+        outputpath = self.core.paths.getMediaConversionOutputPath(
+            context, inputpath, extension
+        )
+
+        if not outputpath:
+            return
+
+        if self.prvIsSequence:
+            startNum = self.pstart
+        else:
+            startNum = 0
+            conversionSettings["-start_number"] = None
+            conversionSettings["-start_number_out"] = None
+
+        result = self.core.media.convertMedia(
+            inputpath, startNum, outputpath, settings=conversionSettings
+        )
+
+        if (
+            extension not in self.core.media.videoFormats
+            and self.prvIsSequence
+        ):
+            outputpath = outputpath % int(startNum)
+
+        self.origin.updateVersions(restoreSelection=True)
+
+        if os.path.exists(outputpath) and os.stat(outputpath).st_size > 0:
+            self.core.copyToClipboard(outputpath, file=True)
+            msg = "The images were converted successfully. (path is in clipboard)"
+            self.core.popup(msg, severity="info")
+        else:
+            msg = "The images could not be converted."
+            logger.debug("expected outputpath: %s" % outputpath)
+            self.core.ffmpegError("Image conversion", msg, result)
+           
 
     @err_catcher(name=__name__)
     def compGetImportSource(self):
@@ -3221,7 +3364,7 @@ class MediaPlayer(QWidget):
         passes = [
             x
             for x in os.listdir(sourceFolder)
-            if x[-5:] not in ["mp4", "jpg", "png"]
+            if x[-5:] not in ["(mp4)", "(jpg)", "(png)"]
             and os.path.isdir(os.path.join(sourceFolder, x))
         ]
         sourceData = []
