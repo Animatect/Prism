@@ -37,7 +37,6 @@ import sys
 import shutil
 import platform
 import subprocess
-from pathlib import Path
 
 prismRoot = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 scriptPath = os.path.join(prismRoot, "Scripts")
@@ -66,40 +65,6 @@ from qtpy.QtWidgets import *
 from PrismUtils.Decorators import err_catcher
 from UserInterfacesPrism import PrismInstaller_ui
 
-def create_mac_shortcut():
-        # Ruta al archivo PrismTray.py
-        prism_root = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-        tray_script = os.path.join(prism_root, "Scripts", "PrismTray.py")
-        
-        if not os.path.exists(tray_script):
-            print(f"Error: No se encontró el archivo PrismTray.py en {tray_script}")
-            return False
-
-        # Nombre del acceso directo
-        shortcut_name = "Prism 2.0.17"
-        
-        # Ruta de destino en el escritorio
-        desktop_path = str(Path.home() / "Desktop")
-        shortcut_path = os.path.join(desktop_path, shortcut_name + ".command")
-        
-        # Verificar si el acceso directo ya existe
-        if os.path.exists(shortcut_path):
-            print(f"El acceso directo ya existe en: {shortcut_path}")
-            return True
-        
-        try:
-            with open(shortcut_path, 'w') as f:
-                f.write("#!/bin/bash\n")
-                f.write(f"cd '{prism_root}'\n")
-                f.write(f"'{sys.executable}' '{tray_script}'\n")
-            
-            os.chmod(shortcut_path, 0o755)
-            
-            print(f"Acceso directo creado exitosamente en: {shortcut_path}")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"Error al crear el acceso directo: {e}")
-            return False
 
 class PrismSetup(QDialog):
 
@@ -335,9 +300,6 @@ class Page_Finished(QWidget):
         super(Page_Finished, self).__init__()
         self.parent = parent
         self.setupUi()
-
-        if platform.system() == "Darwin":
-            create_mac_shortcut()
 
     def setupUi(self):
         self.l_success = QLabel("")

@@ -175,7 +175,7 @@ class PrismCore:
 
         try:
             # set some general variables
-            self.version = "v2.0.16"
+            self.version = "v2.0.17"
             self.requiredLibraries = "v2.0.0"
             self.core = self
             self.preferredExtension = os.getenv("PRISM_CONFIG_EXTENSION", ".json")
@@ -472,6 +472,7 @@ class PrismCore:
             and "noProjectBrowser" not in self.prismArgs
             and (self.getConfig("globals", "showonstartup") is not False or self.appPlugin.pluginName == "Standalone")
             and self.uiAvailable
+            and os.getenv("PRISM_NO_PROJECT_BROWSER") != "1"
         ):
             if self.splashScreen:
                 self.splashScreen.setStatus("opening Project Browser...")
@@ -1898,6 +1899,9 @@ License: GNU LGPL-3.0-or-later<br>
                     self.popup(msg, title=title)
                     return False
 
+                if "project_path" in fnameData:
+                    del fnameData["project_path"]
+
                 fVersion = self.getHighestVersion(fnameData, fnameData.get("department"), fnameData.get("task"))
                 filepath = self.generateScenePath(
                     entity=fnameData,
@@ -3309,7 +3313,7 @@ License: GNU LGPL-3.0-or-later<br>
                             pythonPath = "python"
 
         elif platform.system() == "Linux":
-            pythonPath = "/opt/Prism2/Python311/bin/python"
+            pythonPath = os.path.dirname(os.path.dirname(__file__)) + "/Python311/bin/python"
         else:
             pythonPath = "python3"
 
@@ -3634,6 +3638,8 @@ License: GNU LGPL-3.0-or-later<br>
         def exec_(self):
             if not self.msg:
                 self.createPopup()
+                if not self.msg:
+                    return
 
             for button in self.msg.buttons():
                 button.setVisible(self.allowCancel)

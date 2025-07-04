@@ -829,9 +829,8 @@ class UserSettings(QDialog, UserSettings_ui.Ui_dlg_UserSettings):
                 lpath += os.sep
 
             cData["localfiles"][self.core.projectName] = lpath
-
-        if self.e_localPath.text() != "disabled" and not export:
-            self.core.localProjectPath = lpath
+            if self.e_localPath.text() != "disabled" and not export:
+                self.core.localProjectPath = lpath
 
         if hasattr(self.core, "projectName"):
             useLocal = [
