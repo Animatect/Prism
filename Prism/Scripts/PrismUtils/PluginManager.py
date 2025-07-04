@@ -638,7 +638,7 @@ class PluginManager(object):
                     __import__("Prism_%s_init" % (pluginName)), "Prism_%s" % pluginName
                 )(self.core)
         except:
-            msg = "Failed to load plugin: %s" % pluginName
+            msg = "En un futuro se agregarà el plugin: %s" % pluginName
             detailMsg = msg + "\n\n" + traceback.format_exc()
             logger.debug(detailMsg)
             result = self.core.popupQuestion(
