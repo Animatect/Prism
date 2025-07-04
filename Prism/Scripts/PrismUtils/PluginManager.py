@@ -694,7 +694,6 @@ class PluginManager(object):
             self.core.pb.sceneBrowser.refreshAppFilters()
 
         self.core.callback("pluginLoaded", args=[pPlug])
-        logger.debug("loaded plugin %s" % pPlug.pluginName)
         return pPlug
 
     @err_catcher(name=__name__)
