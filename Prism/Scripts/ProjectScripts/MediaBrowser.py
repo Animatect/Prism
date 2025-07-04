@@ -3325,8 +3325,7 @@ class MediaPlayer(QWidget):
             self.core.popup(msg, severity="info")
         else:
             msg = "The images could not be converted."
-            logger.debug("expected outputpath: %s" % outputpath)
-            self.core.ffmpegError("Image conversion", msg, result)
+            
 
     @err_catcher(name=__name__)
     def compGetImportSource(self):
