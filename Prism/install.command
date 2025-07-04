@@ -1,60 +1,48 @@
 #!/bin/bash
 
 # --- Configuración ---
-PRISM_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/Prism" && pwd )"
-PYTHON_BIN="/usr/bin/python3"  # Python del sistema (cambia a "$PRISM_DIR/Python311/python" para usar el de Prism)
+PRISM_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PYTHON_BIN="/usr/bin/python3"  # Python del sistema
 PYTHON_SCRIPT="$PRISM_DIR/Scripts/PrismInstaller.py"
-PYTHON_LIBS_DIR="/PythonLibs/Python3"
+PYTHON_LIBS_DIR="$PRISM_DIR/PythonLibs/Python3"
 
-# --- Verificar si el script existe ---
+# --- Verificación de estructura ---
+echo "🔍 Verificando estructura en: $PRISM_DIR"
+echo "Contenido del directorio:"
+ls -l
+
+# --- Verificar script principal ---
 if [ ! -f "$PYTHON_SCRIPT" ]; then
     echo "❌ Error: No se encontró PrismInstaller.py en: $PYTHON_SCRIPT"
-    echo "Asegúrate de que el archivo .command esté en la misma carpeta que 'Prism'."
+    echo ""
+    echo "Estructura requerida:"
+    echo "- Prism/ (esta carpeta)"
+    echo "  - Scripts/PrismInstaller.py"
+    echo "  - PythonLibs/Python3/"
+    echo "    - PySide6/"
+    echo "    - psutil/"
     exit 1
 fi
 
-# --- Función para verificar PySide6 ---
-check_pyside6() {
-    local pyside6_path="$PYTHON_LIBS_DIR/PySide6"
-    
-    if [ -d "$pyside6_path" ]; then
-        echo "✅ PySide6 encontrado en: $pyside6_path"
-        return 0
+# --- Función para verificar dependencias ---
+check_dependency() {
+    if [ -d "$PYTHON_LIBS_DIR/$1" ]; then
+        echo "✅ $1 encontrado en: $PYTHON_LIBS_DIR/$1"
     else
-        echo "❌ Error: No se encontró PySide6 en: $pyside6_path"
-        echo "Asegúrate de que la biblioteca PySide6 esté en la carpeta PythonLibs/Python3"
+        echo "❌ Error: No se encontró $1 en: $PYTHON_LIBS_DIR/$1"
+        echo "Contenido de $PYTHON_LIBS_DIR:"
+        ls -l "$PYTHON_LIBS_DIR"
         exit 1
     fi
 }
 
-# --- Función para verificar psutil ---
-check_psutil() {
-    local psutil_path="$PYTHON_LIBS_DIR/Psutil"
-    
-    if [ -d "$psutil_path" ]; then
-        echo "✅ psutil encontrado en: $psutil_path"
-        return 0
-    else
-        echo "❌ Error: No se encontró psutil en: $psutil_path"
-        echo "Asegúrate de que la biblioteca psutil esté en la carpeta PythonLibs/Python3"
-        exit 1
-    fi
-}
+# --- Verificar dependencias ---
+echo "🔍 Verificando dependencias en: $PYTHON_LIBS_DIR"
+check_dependency "PySide6"
+check_dependency "psutil"
 
-# --- Verificar dependencias de Python ---
-echo "🔍 Verificando dependencias de Python..."
-
-# Verificar PySide6
-check_pyside6
-
-# Verificar psutil
-check_psutil
-
-# --- Ejecutar PrismInstaller.py ---
+# --- Ejecutar Prism ---
 echo ""
 echo "🚀 Iniciando Prism..."
-echo "Directorio de Prism: $PRISM_DIR"
-echo "Python usado: $PYTHON_BIN"
-echo ""
-
+cd "$PRISM_DIR" || exit 1
 "$PYTHON_BIN" "$PYTHON_SCRIPT"
