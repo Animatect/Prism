@@ -53,7 +53,7 @@ class PluginManager(object):
         super(PluginManager, self).__init__()
         self.core = core
         self.monkeyPatchedFunctions = {}
-        self.ignoreAutoLoadPlugins = [name.strip() for name in os.getenv("PRISM_IGNORE_AUTOLOAD_PLUGINS", "").split(",")]
+        self.ignoreAutoLoadPlugins = [name.strip() for name in os.getenv("PRISM_IGNORE_AUTOLOAD_PLUGINS", "PrismInternals, Hub").split(",")]
 
     @err_catcher(name=__name__)
     def initializePlugins(self, appPlugin):
