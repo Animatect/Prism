@@ -48,6 +48,8 @@ import tempfile
 import glob
 import importlib
 import atexit
+import code
+import io
 from datetime import datetime
 from multiprocessing.connection import Listener, Client
 
@@ -175,7 +177,6 @@ class PrismCore:
 
         try:
             # set some general variables
-            self.version = "v2.0.17"
             self.requiredLibraries = "v2.0.0"
             self.core = self
             self.preferredExtension = os.getenv("PRISM_CONFIG_EXTENSION", ".json")
@@ -242,6 +243,7 @@ class PrismCore:
             self.registeredStyleSheets = []
             self.activeStyleSheet = None
             self.useTranslation = False
+            self.pythonHighlighter = PythonHighlighter
 
             if API_NAME == "PySide6":
                 import PySide6
@@ -289,6 +291,7 @@ class PrismCore:
 
             oldSheet = os.path.join(self.prismRoot, "Scripts", "UserInterfacesPrism", "stylesheets", "qdarkstyle")
             self.registerStyleSheet(oldSheet)
+            self.initializeLanguage()
 
             self.pluginPathApp = os.path.abspath(
                 os.path.join(__file__, os.pardir, os.pardir, "Plugins", "Apps")
@@ -343,6 +346,7 @@ class PrismCore:
 
         if platform.system() == "Windows":
             path = self.getWindowsDocumentsPath()
+            path = self.getWindowsDocumentsPath() or (self.getPrismDataDir() + "/userprefs")
         elif platform.system() == "Linux":
             path = os.path.join(os.environ["HOME"])
         elif platform.system() == "Darwin":
