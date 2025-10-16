@@ -55,6 +55,7 @@ class ProjectEntities(object):
         self.core = core
         self.entityFolders = {"asset": ["Textures"], "shot": []}
         self.entityActions = {}
+        self.depIcons = {}
         self.entityDlg = EntityDlg
         self.refreshOmittedEntities()
 
@@ -358,7 +359,8 @@ class ProjectEntities(object):
                 continue
 
             if (
-                searchFilter.lower() not in data["sequence"].lower()
+                ("episode" not in data or searchFilter.lower() not in data["episode"].lower())
+                and searchFilter.lower() not in data["sequence"].lower()
                 and searchFilter.lower() not in data["shot"].lower()
             ):
                 metaData = self.getMetaData(data)
@@ -377,6 +379,7 @@ class ProjectEntities(object):
                 if (
                     shotDict["sequence"] == shot["sequence"]
                     and shotDict["shot"] == shot["shot"]
+                    and ("episode" not in shotDict or shotDict.get("episode") == shot.get("episode"))
                 ):
                     data = {"location": shotDict["location"], "path": shotDict["path"]}
                     shot["paths"].append(data)
@@ -991,6 +994,16 @@ class ProjectEntities(object):
             return abbrvs[0]
 
     @err_catcher(name=__name__)
+    def getDepartmentIcon(self, department):
+        if department in self.depIcons:
+            return self.depIcons[department]
+
+        path = os.path.join(self.core.projects.getPipelineFolder(), "Icons", department + ".png")
+        icon = QIcon(path)
+        self.depIcons[department] = icon
+        return icon
+
+    @err_catcher(name=__name__)
     def getDefaultTasksForDepartment(self, entity, department):
         if entity == "asset":
             existingDeps = self.core.projects.getAssetDepartments()
@@ -1307,31 +1320,47 @@ class ProjectEntities(object):
         return metadata
 
     @err_catcher(name=__name__)
-    def setMetaData(self, entity, metaData):
-        if entity["type"] == "asset":
-            data = self.core.getConfig(config="assetinfo", allowCache=False) or {}
-            if "assets" not in data:
-                data["assets"] = {}
+    def setMetaData(self, entity=None, metaData=None, entities=None, metaDatas=None):
+        if entity and not entities:
+            entities = [entity]
+            metaDatas = [metaData]
 
-            entityName = self.core.entities.getAssetNameFromPath(entity["asset_path"])
-            if entityName not in data["assets"]:
-                data["assets"][entityName] = {}
+        assetConfig = None
+        shotConfig = None
+        for idx, entity in enumerate(entities):
+            metaData = metaDatas[idx]
+            if entity["type"] == "asset":
+                if assetConfig is None:
+                    assetConfig = self.core.getConfig(config="assetinfo", allowCache=False) or {}
 
-            data["assets"][entityName]["metadata"] = metaData
-            self.core.setConfig(data=data, config="assetinfo", updateNestedData=False)
-        elif entity["type"] == "shot":
-            data = self.core.getConfig(config="shotinfo", allowCache=False) or {}
-            if "shots" not in data:
-                data["shots"] = {}
+                if "assets" not in assetConfig:
+                    assetConfig["assets"] = {}
 
-            if entity["sequence"] not in data["shots"]:
-                data["shots"][entity["sequence"]] = {}
+                entityName = self.core.entities.getAssetNameFromPath(entity["asset_path"])
+                if entityName not in assetConfig["assets"]:
+                    assetConfig["assets"][entityName] = {}
 
-            if entity["shot"] not in data["shots"][entity["sequence"]]:
-                data["shots"][entity["sequence"]][entity["shot"]] = {}
+                assetConfig["assets"][entityName]["metadata"] = metaData
+            elif entity["type"] == "shot":
+                if shotConfig is None:
+                    shotConfig = self.core.getConfig(config="shotinfo", allowCache=False) or {}
 
-            data["shots"][entity["sequence"]][entity["shot"]]["metadata"] = metaData
-            self.core.setConfig(data=data, config="shotinfo", updateNestedData=False)
+                if "shots" not in shotConfig:
+                    shotConfig["shots"] = {}
+
+                if entity["sequence"] not in shotConfig["shots"]:
+                    shotConfig["shots"][entity["sequence"]] = {}
+
+                if entity["shot"] not in shotConfig["shots"][entity["sequence"]]:
+                    shotConfig["shots"][entity["sequence"]][entity["shot"]] = {}
+
+                shotConfig["shots"][entity["sequence"]][entity["shot"]]["metadata"] = metaData
+        
+        if assetConfig is not None:
+            self.core.setConfig(data=assetConfig, config="assetinfo", updateNestedData=False)
+
+        if shotConfig is not None:
+            self.core.setConfig(data=shotConfig, config="shotinfo", updateNestedData=False)
 
     @err_catcher(name=__name__)
     def deleteShot(self, shotName):
@@ -2174,7 +2203,7 @@ class ProjectEntities(object):
             kwargs.update(data)
 
         createdFiles = []
-        for file in files:
+        for idx, file in enumerate(files):
             kwargs["extension"] = os.path.splitext(file)[1]
             targetPath = self.core.paths.generateScenePath(**kwargs)
             if self.core.useLocalFiles:
@@ -2192,7 +2221,8 @@ class ProjectEntities(object):
 
             targetPath = targetPath.replace("\\", "/")
 
-            self.core.copyWithProgress(file, targetPath, finishCallback=finishCallback)
+            thread = self.core.copyWithProgress(file, targetPath, finishCallback=finishCallback)
+            thread.wait(999999999)
             details = entity.copy()
             details["department"] = department
             details["task"] = task
@@ -2839,7 +2869,7 @@ class ConnectEntitiesDlg(QDialog):
     @err_catcher(name=__name__)
     def onAccepted(self):
         entities = self.w_entities.getCurrentData(returnOne=False)
-        entities = [e for e in entities if e["type"] in ["asset", "shot"]]
+        entities = [e for e in entities if e["type"] in ["asset", "shot"] and ("asset_path" in e or "shot" in e)]
         if not entities:
             msg = "No valid entity selected."
             self.core.popup(msg)

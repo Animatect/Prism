@@ -103,7 +103,7 @@ class FolderClass(object):
         result = []
         self.osSubmittedJobs = {}
         self.osDependencies = []
-        self.dependencies = []
+        self.dependencies = (parent.dependencies if parent else None) or []
 
         for i in range(self.state.childCount()):
             curState = self.state.child(i)

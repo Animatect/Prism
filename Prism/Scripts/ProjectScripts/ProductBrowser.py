@@ -161,9 +161,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
                 brsData["showSearchAlways"]
             )
 
-        if len(self.w_entities.getLocations()) > 1 or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
-            self.versionLabels.insert(3, "Location")
-
+        self.refreshLocations()
         if self.projectBrowser and self.projectBrowser.act_rememberWidgetSizes.isChecked():
             if "productsSplitter1" in brsData:
                 self.splitter1.setSizes(brsData["productsSplitter1"])
@@ -178,6 +176,18 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         self.setStyleSheet("QSplitter::handle{background-color: transparent}")
         self.updateSizeColumn()
         self.tw_versions.sortByColumn(0, Qt.DescendingOrder)
+
+    @err_catcher(name=__name__)
+    def refreshLocations(self):
+        if len(self.w_entities.getLocations()) > 1 or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
+            if "Location" not in self.versionLabels:
+                self.versionLabels.insert(3, "Location")
+                self.versionHeaderChanged()
+
+        else:
+            if "Location" in self.versionLabels:
+                self.versionLabels.remove("Location")
+                self.versionHeaderChanged()
 
     @err_catcher(name=__name__)
     def saveSettings(self, data):
@@ -680,8 +690,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         openex.triggered.connect(lambda: self.core.openFolder(path))
         rcmenu.addAction(openex)
 
-        copAct = QAction("Copy", viewUi)
-        copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+        copAct = self.core.getCopyAction(path, parent=viewUi)
         rcmenu.addAction(copAct)
 
         copAct = QAction("Copy path for next version", self)
@@ -1356,7 +1365,7 @@ class ProductBrowser(QDialog, ProductBrowser_ui.Ui_dlg_ProductBrowser):
         if (data.get("locations", {}) and len(self.w_entities.getLocations()) > 1) or (self.projectBrowser and len(self.projectBrowser.locations) > 1):
             self.locationLabels = {}
             locations = []
-            if self.projectBrowser and len(self.projectBrowser.locations) > 1:
+            if self.projectBrowser and len(self.projectBrowser.locations) > 1 and "Location" in self.versionLabels:
                 locations = []
                 w_location = QWidget()
                 lo_location = QHBoxLayout(w_location)

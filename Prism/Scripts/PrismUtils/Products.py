@@ -99,6 +99,9 @@ class Products(object):
         products = []
         for loc in searchLocations:
             context = entity.copy()
+            if "product" in context:
+                del context["product"]
+
             if locations != "project_path":
                 context["project_path"] = locationData[loc]
 

@@ -638,14 +638,14 @@ class PluginManager(object):
                     __import__("Prism_%s_init" % (pluginName)), "Prism_%s" % pluginName
                 )(self.core)
         except:
-            msg = "En un futuro se agregarà el plugin: %s" % pluginName
+            msg = "Failed to load plugin: %s" % pluginName
             detailMsg = msg + "\n\n" + traceback.format_exc()
             logger.debug(detailMsg)
             result = self.core.popupQuestion(
                 msg,
                 buttons=["Details", "Close"],
                 icon=QMessageBox.Warning,
-                default="Details",
+                default="Close",
             )
 
             if result == "Details":
@@ -694,6 +694,7 @@ class PluginManager(object):
             self.core.pb.sceneBrowser.refreshAppFilters()
 
         self.core.callback("pluginLoaded", args=[pPlug])
+        logger.debug("loaded plugin %s" % pPlug.pluginName)
         return pPlug
 
     @err_catcher(name=__name__)
@@ -731,7 +732,7 @@ class PluginManager(object):
                 msg,
                 buttons=["Details", "Close"],
                 icon=QMessageBox.Warning,
-                default="Details",
+                default="Close",
             )
             if result == "Details":
                 detailMsg = msg + "\n\n" + traceback.format_exc()

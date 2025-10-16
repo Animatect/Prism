@@ -59,7 +59,7 @@ def err_handler(func, name="", plugin=False):
                 core = args[0].core
             else:
                 core = None
-                logger.warning("class has no core")
+                logger.warning("object %s has no core" % args[0])
 
             data = {}
             versionStr = ""

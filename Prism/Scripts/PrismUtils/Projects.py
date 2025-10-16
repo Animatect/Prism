@@ -164,7 +164,7 @@ class Projects(object):
             self.core.popup(msg, parent=parent)
 
     @err_catcher(name=__name__)
-    def changeProject(self, configPath=None, openUi="", settingsTab=None, settingsType=None, unset=False):
+    def changeProject(self, configPath=None, openUi="", settingsTab=None, settingsType=None, unset=False, writeToConfig=None):
         if not unset:
             if configPath is None:
                 return
@@ -356,7 +356,7 @@ class Projects(object):
             QApplication.setQuitOnLastWindowClosed(quitOnLastWindowClosed)
             return
 
-        if configPath != self.core.getConfig("globals", "current project") and self.core.uiAvailable:
+        if configPath != self.core.getConfig("globals", "current project") and (self.core.uiAvailable or writeToConfig):
             self.core.setConfig("globals", "current project", configPath)
 
         self.core.versionPadding = self.core.getConfig(
@@ -756,8 +756,8 @@ class Projects(object):
         dftDepsShot = [
             {"name": "Layout", "abbreviation": "lay", "defaultTasks": ["Layout"]},
             {"name": "Animation", "abbreviation": "anm", "defaultTasks": ["Animation"]},
-            {"name": "FX", "abbreviation": "fx", "defaultTasks": ["Effects"]},
             {"name": "CharFX", "abbreviation": "cfx", "defaultTasks": ["CharacterEffects"]},
+            {"name": "FX", "abbreviation": "fx", "defaultTasks": ["Effects"]},
             {"name": "Lighting", "abbreviation": "lgt", "defaultTasks": ["Lighting"]},
             {"name": "Compositing", "abbreviation": "cmp", "defaultTasks": ["Compositing"]},
         ]
@@ -832,7 +832,7 @@ class Projects(object):
         else:
             projectSettings = {}
 
-        projectSettings.update(settings)
+        self.core.configs.updateNestedDicts(projectSettings, settings)
         projectSettings["globals"]["project_name"] = prjName
         projectSettings["globals"]["prism_version"] = self.core.version
 
@@ -1295,13 +1295,13 @@ class Projects(object):
         structure["renderFilesAssets"] = {
             "label": "Asset Renderfiles",
             "key": "@renderfile_path@",
-            "value": "[expression,#  available variables:\n#  \"core\" - PrismCore\n#  \"context\" - dict\n\nif context.get(\"mediaType\") == \"2drenders\":\n\ttemplate = \"@aov_path@/@asset@_@identifier@_@version@@.(frame)@@extension@\"\nelse:\n\ttemplate = \"@aov_path@/@asset@_@identifier@_@version@_@aov@@.(frame)@@extension@\"]",
+            "value": "[expression,#  available variables:\n#  \"core\" - PrismCore\n#  \"context\" - dict\n\nif context.get(\"mediaType\") == \"2drenders\":\n\ttemplate = \"@aov_path@/@asset@_@identifier@_@version@@.(frame)@@extension@\"\nelse:\n\ttemplate = \"@aov_path@/@asset@_@identifier@_@version@@._(layer)@_@aov@@.(frame)@@extension@\"]",
             "requires": ["aov_path"],
         }
         structure["renderFilesShots"] = {
             "label": "Shot Renderfiles",
             "key": "@renderfile_path@",
-            "value": "[expression,#  available variables:\n#  \"core\" - PrismCore\n#  \"context\" - dict\n\nif context.get(\"mediaType\") == \"2drenders\":\n\ttemplate = \"@aov_path@/@sequence@-@shot@_@identifier@_@version@@.(frame)@@extension@\"\nelse:\n\ttemplate = \"@aov_path@/@sequence@-@shot@_@identifier@_@version@_@aov@@.(frame)@@extension@\"]",
+            "value": "[expression,#  available variables:\n#  \"core\" - PrismCore\n#  \"context\" - dict\n\nif context.get(\"mediaType\") == \"2drenders\":\n\ttemplate = \"@aov_path@/@sequence@-@shot@_@identifier@_@version@@.(frame)@@extension@\"\nelse:\n\ttemplate = \"@aov_path@/@sequence@-@shot@_@identifier@_@version@@_(layer)@_@aov@@.(frame)@@extension@\"]",
             "requires": ["aov_path"],
         }
         structure["playblasts"] = {
@@ -1355,7 +1355,7 @@ class Projects(object):
                 "value": "@project_path@/03_Workflow/Assets/@asset_path@"
             },
             "sequences": {
-                "value": "@project_path@/03_Workflow/Shots/@sequence@"
+                "value": "@project_path@/03_Workflow/Shots/@sequence@-@shot@"
             }, 
             "shots": {
                 "value": "@project_path@/03_Workflow/Shots/@sequence@-@shot@"
@@ -1870,6 +1870,10 @@ class Projects(object):
             rePath = rePath.replace(re.escape("@%s@" % key), reval, 1)
             usedKeys.append(key)
 
+        if self.core.prism1Compatibility:
+            if "(?P<sequence>.*)\-(?P<shot>.*)" in rePath:
+                rePath = rePath.replace("(?P<sequence>.*)\-(?P<shot>.*)", "(?P<sequence>[^-]+)\-(?P<shot>.*)")
+
         pathData = []
         for match in matches:
             origMatch = match
@@ -2275,12 +2279,12 @@ class Projects(object):
                         "tasks": ["Animation"]
                     },
                     {
-                        "name": "FX",
-                        "tasks": ["Effects"]
-                    },
-                    {
                         "name": "CharFX",
                         "tasks": ["CharacterEffects"]
+                    },
+                    {
+                        "name": "FX",
+                        "tasks": ["Effects"]
                     },
                     {
                         "name": "Lighting",

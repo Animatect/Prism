@@ -89,8 +89,9 @@ class MediaManager(object):
             ".mov",
             ".avi",
             ".m4v",
+            ".mxf",
         ]
-        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v"]
+        self.videoFormats = [".mp4", ".mov", ".avi", ".m4v", ".mxf"]
         self.getImageIO()
 
     @err_catcher(name=__name__)
@@ -345,6 +346,14 @@ class MediaManager(object):
                 except:
                     pass
 
+                try:
+                    imageio.config.known_plugins["FFMPEG"].legacy_args["extensions"] += " .mxf"
+                    for ext in imageio.config.extension_list:
+                        if ext.extension == ".mxf":
+                            ext.priority.insert(0, "FFMPEG")
+                except:
+                    pass
+
             self._imageio = imageio
 
         return self._imageio
@@ -413,7 +422,7 @@ class MediaManager(object):
         inputpath = inputpath.replace("\\", "/")
         inputExt = os.path.splitext(inputpath)[1].lower()
         outputExt = os.path.splitext(outputpath)[1].lower()
-        videoInput = inputExt in [".mp4", ".mov", ".m4v"]
+        videoInput = inputExt in self.videoFormats
         startNum = str(startNum) if startNum is not None else None
 
         ffmpegPath = self.getFFmpeg(validate=True)
@@ -552,11 +561,17 @@ class MediaManager(object):
 
             exts = [".R", ".G", ".B", ".Z", ".r", ".g", ".b", ".red", ".green", ".blue", ".x", ".y", ".z"]
             for name in cnames:
+                canAdd = True
                 for ext in exts:
                     if name.endswith(ext):
-                        name = name[:-len(ext)]
-                        if name not in names:
-                            names.append(name)
+                        lname = name[:-len(ext)]
+                        canAdd = False
+                        if lname not in names:
+                            names.append(lname)
+                            break
+                else:
+                    if canAdd and name not in ["R", "G", "B", "r", "g", "b"]:
+                        names.append(name)
 
             imgNum += 1
 
@@ -799,6 +814,9 @@ nuke.execute(write, %s, %s)
                                     numChannels = 1
                                 elif idx == -1 and channel in ["RGB", "RGBA"]:
                                     idx = imgInput.spec().channelindex("R")
+                                elif idx == -1:
+                                    idx = imgInput.spec().channelindex(channel)
+                                    numChannels = 1
 
                 if idx == -1:
                     subimage += 1
@@ -1115,7 +1133,7 @@ nuke.execute(write, %s, %s)
                 imgSpecs = buf.spec()
                 pwidth = imgSpecs.full_width
                 pheight = imgSpecs.full_height
-        elif ext in [".mp4", ".mov", ".avi", ".m4v"]:
+        elif ext in self.videoFormats:
             if videoReader is None:
                 videoReader = self.getVideoReader(path)
 
@@ -1173,25 +1191,46 @@ nuke.execute(write, %s, %s)
         return result
 
     @err_catcher(name=__name__)
-    def getExternalMediaPlayer(self):
-        player = {
-            "name": self.core.getConfig("globals", "mediaPlayerName") or "Media Player",
-            "path": self.core.getConfig("globals", "mediaPlayerPath"),
-            "framePattern": self.core.getConfig("globals", "mediaPlayerFramePattern") or False
-        }
-        if not player["path"]:
-            path = self.core.getConfig("globals", "rvpath")
-            if not path:
-                path = self.core.getConfig("globals", "djvpath")
+    def getExternalMediaPlayers(self):
+        playerData = self.core.getConfig("globals", "mediaPlayers") or []
+        players = []
+        for player in playerData:
+            pl = {
+                "name": player.get("name") or "Media Player",
+                "path": player.get("path"),
+                "framePattern": player.get("understandsFramepattern"),
+            }
+            if not pl["path"]:
+                path = self.core.getConfig("globals", "rvpath")
+                if not path:
+                    path = self.core.getConfig("globals", "djvpath")
 
-            if path:
-                player["path"] = path
+                if path:
+                    pl["path"] = path
 
-        return player
+            players.append(pl)
+
+        return players
 
     @err_catcher(name=__name__)
-    def playMediaInExternalPlayer(self, path):
-        progPath = self.getExternalMediaPlayer().get("path")
+    def getExternalMediaPlayer(self, name=None):
+        players = self.getExternalMediaPlayers()
+        if not players:
+            return
+
+        if name:
+            for player in players:
+                if player["name"] == name:
+                    return player
+
+            return
+
+        return players[0]
+
+    @err_catcher(name=__name__)
+    def playMediaInExternalPlayer(self, path, name=None):
+        mediaPlayer = self.getExternalMediaPlayer(name=name)
+        progPath = mediaPlayer.get("path")
         if not progPath:
             logger.warning("no media player path defined")
             return
@@ -1204,9 +1243,13 @@ nuke.execute(write, %s, %s)
                 logger.warning("media filepath doesn't exist: %s" % path)
                 return
 
-            path = paths[0]
+            if not mediaPlayer.get("framePattern"):
+                path = paths[0]
 
         comd = [progPath, path]
+        if platform.system() == "Darwin" and progPath.endswith(".app"):
+            comd = ["open", "-a"] + comd
+
         logger.debug("opening media: %s" % comd)
         with open(os.devnull, "w") as f:
             try:

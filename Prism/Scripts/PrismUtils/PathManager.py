@@ -34,6 +34,7 @@
 
 import os
 import re
+import logging
 from collections import OrderedDict
 
 from qtpy.QtCore import *
@@ -41,6 +42,9 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from PrismUtils.Decorators import err_catcher
+
+
+logger = logging.getLogger(__name__)
 
 
 class PathManager(object):
@@ -91,8 +95,10 @@ class PathManager(object):
             if outputData:
                 outputPath = outputData["path"].replace("\\", "/")
             else:
+                # logger.debug("no output data: %s - %s - %s - %s" % (fnameData, taskName, version, extension))
                 outputPath = "FileNotInPipeline"
         else:
+            # logger.debug("not in pipeline: %s" % fileName)
             outputPath = "FileNotInPipeline"
 
         if render and outputPath != "FileNotInPipeline":

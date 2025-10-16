@@ -39,6 +39,7 @@ import logging
 import traceback
 from collections import OrderedDict
 import shutil
+import platform
 
 prismRoot = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -1031,13 +1032,7 @@ class MediaBrowser(QWidget, MediaBrowser_ui.Ui_w_mediaBrowser):
             opAct.triggered.connect(lambda: self.core.openFolder(path))
             rcmenu.addAction(opAct)
 
-            copAct = QAction("Copy", self)
-            iconPath = os.path.join(
-                self.core.prismRoot, "Scripts", "UserInterfacesPrism", "copy.png"
-            )
-            icon = self.core.media.getColoredIcon(iconPath)
-            copAct.setIcon(icon)
-            copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+            copAct = self.core.getCopyAction(path, parent=self)
             rcmenu.addAction(copAct)
 
         if lw == self.lw_version:
@@ -1929,13 +1924,7 @@ class MediaVersionPlayer(QWidget):
             opAct.triggered.connect(lambda: self.core.openFolder(path))
             rcmenu.addAction(opAct)
 
-            copAct = QAction("Copy", self)
-            iconPath = os.path.join(
-                self.core.prismRoot, "Scripts", "UserInterfacesPrism", "copy.png"
-            )
-            icon = self.core.media.getColoredIcon(iconPath)
-            copAct.setIcon(icon)
-            copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+            copAct = self.core.getCopyAction(path, parent=self)
             rcmenu.addAction(copAct)
 
         if rcmenu.isEmpty():
@@ -1991,6 +1980,7 @@ class MediaPlayer(QWidget):
         self.origin = self.mediaVersionPlayer.origin
         self.core = self.origin.core
 
+        self.externalMediaPlayers = None
         self.renderResX = 300
         self.renderResY = 169
         self.videoReaders = {}
@@ -1998,6 +1988,7 @@ class MediaPlayer(QWidget):
         self.mediaThreads = []
         self.timeline = None
         self.tlPaused = False
+        self.prvIsSequence = False
         self.seq = []
         self.pduration = 0
         self.pwidth = 0
@@ -2886,10 +2877,11 @@ class MediaPlayer(QWidget):
             icon = self.core.media.getColoredIcon(iconPath)
             playMenu.setIcon(icon)
 
-            if self.mediaPlayerPath is not None:
-                pAct = QAction(self.mediaPlayerName, self)
-                pAct.triggered.connect(self.compare)
-                playMenu.addAction(pAct)
+            if self.externalMediaPlayers is not None:
+                for player in self.externalMediaPlayers:
+                    pAct = QAction(player.get("name", ""), self)
+                    pAct.triggered.connect(lambda x=None, name=player.get("name", ""): self.compare(name))
+                    playMenu.addAction(pAct)
 
             pAct = QAction("Default", self)
             pAct.triggered.connect(
@@ -2993,13 +2985,7 @@ class MediaPlayer(QWidget):
         exp.triggered.connect(lambda: self.core.openFolder(path))
         rcmenu.addAction(exp)
 
-        copAct = QAction("Copy", self)
-        iconPath = os.path.join(
-            self.core.prismRoot, "Scripts", "UserInterfacesPrism", "copy.png"
-        )
-        icon = self.core.media.getColoredIcon(iconPath)
-        copAct.setIcon(icon)
-        copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+        copAct = self.core.getCopyAction(path, parent=self)
         rcmenu.addAction(copAct)
 
         return rcmenu
@@ -3141,7 +3127,19 @@ class MediaPlayer(QWidget):
         if prog == "default":
             progPath = ""
         else:
-            progPath = self.mediaPlayerPath or ""
+            mediaPlayer = None
+            if prog and self.externalMediaPlayers:
+                matchingPlayers = [player for player in self.externalMediaPlayers if player.get("name") == prog]
+                if matchingPlayers:
+                    mediaPlayer = matchingPlayers[0]
+                else:
+                    self.core.popup("Can't find media player: %s" % prog)
+                    return
+
+            if not mediaPlayer:
+                mediaPlayer = self.externalMediaPlayers[0] if self.externalMediaPlayers else None
+
+            progPath = (mediaPlayer.get("path") or "") if mediaPlayer else ""
 
         comd = []
         filePath = ""
@@ -3157,7 +3155,7 @@ class MediaPlayer(QWidget):
                         subprocess.call(cmd, shell=True)
                         return
                     else:
-                        if self.mediaPlayerPattern:
+                        if mediaPlayer and mediaPlayer.get("framePattern"):
                             filePath = self.core.media.getSequenceFromFilename(filePath)
 
                         comd = [progPath, filePath]
@@ -3173,6 +3171,9 @@ class MediaPlayer(QWidget):
                 mpEnv[envVar["key"]] = envVar["value"]
 
             comd[0] = os.path.expandvars(comd[0])
+            if platform.system() == "Darwin" and progPath.endswith(".app"):
+                comd = ["open", "-a"] + comd
+
             self.core.callback(name="preLaunchApp", args=[comd, mpEnv])
             with open(os.devnull, "w") as f:
                 logger.debug("launching: %s" % comd)
@@ -3223,10 +3224,7 @@ class MediaPlayer(QWidget):
 
     @err_catcher(name=__name__)
     def updateExternalMediaPlayer(self):
-        player = self.core.media.getExternalMediaPlayer()
-        self.mediaPlayerPath = player.get("path", None)
-        self.mediaPlayerName = player.get("name", None)
-        self.mediaPlayerPattern = player.get("framePattern", None)
+        self.externalMediaPlayers = self.core.media.getExternalMediaPlayers()
 
     @err_catcher(name=__name__)
     def getRVdLUT(self):
@@ -3320,12 +3318,17 @@ class MediaPlayer(QWidget):
         self.origin.updateVersions(restoreSelection=True)
 
         if os.path.exists(outputpath) and os.stat(outputpath).st_size > 0:
-            self.core.copyToClipboard(outputpath, file=True)
+            if os.getenv("PRISM_COPY_FILE_CONTENT", "0") == "1":
+                self.core.copyToClipboard(outputpath, file=True)
+            else:
+                self.core.copyToClipboard(outputpath, file=False)
+
             msg = "The images were converted successfully. (path is in clipboard)"
             self.core.popup(msg, severity="info")
         else:
             msg = "The images could not be converted."
-            
+            logger.debug("expected outputpath: %s" % outputpath)
+            self.core.ffmpegError("Image conversion", msg, result)
 
     @err_catcher(name=__name__)
     def compGetImportSource(self):

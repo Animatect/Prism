@@ -290,11 +290,20 @@ class MediaProducts(object):
         return versionData
 
     @err_catcher(name=__name__)
-    def getFileFromVersion(self, version, aov=None):
+    def getFileFromVersion(self, version, aov=None, findExisting=False):
         if aov:
             version["aov"] = aov
 
         file = self.getFilePatternFromVersion(version)
+        if findExisting:
+            filepaths = self.core.media.getFilesFromSequence(file)
+            if not filepaths:
+                sources = self.core.media.getImgSources(os.path.dirname(file))
+                if sources:
+                    file = sources[0]
+                else:
+                    return
+
         return file        
 
     @err_catcher(name=__name__)
@@ -477,7 +486,7 @@ class MediaProducts(object):
                         files = [os.path.join(rdroot, rdf) for rdf in rdfiles]
 
             elif context.get("source"):
-                globPath = os.path.join(folder, context["source"].replace("#", "?"))
+                globPath = os.path.join(glob.escape(folder), context["source"].replace("#", "?"))
                 files = glob.glob(globPath)
             else:
                 files = []
@@ -688,6 +697,9 @@ class MediaProducts(object):
                 "frame": framePadding,
             }
         )
+        if "layer" not in context:
+            context["layer"] = ""
+
         if additionalContext:
             context.update(additionalContext)
 

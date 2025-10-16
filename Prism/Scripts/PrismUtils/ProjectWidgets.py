@@ -2313,6 +2313,7 @@ class IngestMediaDlg(QDialog):
                 paths = "\n".join(sorted(pathList))
 
         self.l_mediaPath.setText(paths)
+        self.enableOk()
 
     @err_catcher(name=__name__)
     def mediaMouseClickEvent(self, event):
@@ -2504,7 +2505,8 @@ class IngestMediaDlg(QDialog):
 
     @err_catcher(name=__name__)
     def browseFolder(self):
-        startpath = self.l_mediaPath.text() or self.core.projectPath
+        curText = self.l_mediaPath.text()
+        startpath = curText if curText and not curText.startswith("<") else self.core.projectPath
         selectedPath = QFileDialog.getExistingDirectory(
             self, "Select media folder", startpath
         )
@@ -2514,7 +2516,8 @@ class IngestMediaDlg(QDialog):
 
     @err_catcher(name=__name__)
     def browseFile(self):
-        startpath = self.l_mediaPath.text() or self.core.projectPath
+        curText = self.l_mediaPath.text()
+        startpath = curText if curText and not curText.startswith("<") else self.core.projectPath
         selectedFile = QFileDialog.getOpenFileName(
             self, "Select media file", startpath
         )[0]

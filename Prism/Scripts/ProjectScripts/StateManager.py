@@ -87,6 +87,7 @@ class StateManager(QMainWindow, StateManager_ui.Ui_mw_StateManager):
         self.core.stateManagerInCreation = self
         self.finishedDeletionCallbacks = []
         self.curExecutedState = None
+        self.useCommentsFromStates = False
 
         self.enabledCol = QBrush(
             self.tw_import.palette().color(self.tw_import.foregroundRole())
@@ -636,6 +637,15 @@ class %s(QWidget, %s.%s, %s.%sClass):
             self.appendChildStates(stateData[len(stateData) - 1][0], stateData)
 
         self.states = [x[0] for x in stateData]
+
+    @err_catcher(name=__name__)
+    def useStateComments(self):
+        if "PRISM_USE_STATE_COMMENTS" in os.environ:
+            useStateComments = os.getenv("PRISM_USE_STATE_COMMENTS", "0") == "1"
+        else:
+            useStateComments = self.useCommentsFromStates
+
+        return useStateComments
 
     @err_catcher(name=__name__)
     def connectEvents(self):
@@ -1893,6 +1903,8 @@ QGroupBox::indicator:checked {
         sanityChecks=True,
         versionWarning=True,
         currentSceneWaring=True,
+        dependencies=None,
+        comment=None,
     ):
         if self.publishPaused and not continuePublish:
             return
@@ -1970,16 +1982,22 @@ QGroupBox::indicator:checked {
             if saveScene is None:
                 saveScene = self.actionSaveBeforePub.isChecked()
 
+            if comment is None:
+                comment = self.e_comment.text()
+
             if saveScene is None or saveScene is True:
                 if executeState:
                     increment = (False if incrementScene is None else incrementScene) and not incrementAfterPublish
                     sceneSaved = self.core.saveScene(
-                        versionUp=increment, details=details, preview=self.previewImg
+                        comment=comment,
+                        versionUp=increment,
+                        details=details,
+                        preview=self.previewImg,
                     )
                 else:
                     increment = (self.actionVersionUp.isChecked() if incrementScene is None else incrementScene) and not incrementAfterPublish
                     sceneSaved = self.core.saveScene(
-                        comment=self.e_comment.text(),
+                        comment=comment,
                         publish=True,
                         versionUp=increment,
                         details=details,
@@ -2007,11 +2025,11 @@ QGroupBox::indicator:checked {
             self.saveStatesToScene()
 
             self.publishResult = []
-            self.dependencies = []
+            self.dependencies = dependencies or []
             self.reloadScenefile = False
             self.publishInfos = {"updatedExports": {}, "backgroundRender": None}
             self.core.sceneOpenChecksEnabled = False
-            self.publishComment = self.e_comment.text()
+            self.publishComment = comment
 
             getattr(self.core.appPlugin, "sm_preExecute", lambda x: None)(self)
             result = self.core.callback(name="prePublish", args=[self])
@@ -2107,13 +2125,16 @@ QGroupBox::indicator:checked {
                 increment = False if incrementScene is None else incrementScene
                 if increment:
                     sceneSaved = self.core.saveScene(
-                        versionUp=increment, details=details, preview=self.previewImg
+                        comment=self.publishComment,
+                        versionUp=increment,
+                        details=details,
+                        preview=self.previewImg,
                     )
             else:
                 increment = self.actionVersionUp.isChecked() if incrementScene is None else incrementScene
                 if increment:
                     sceneSaved = self.core.saveScene(
-                        comment=self.e_comment.text(),
+                        comment=self.publishComment,
                         publish=True,
                         versionUp=increment,
                         details=details,

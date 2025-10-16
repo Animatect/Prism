@@ -647,7 +647,7 @@ class EntityPage(QWidget):
             for childnum in range(item.childCount()):
                 self.refreshAssetItem(item.child(childnum))
         elif self.entityType == "shot":
-            if itemData.get("loaded") is False:
+            if not self.core.isStr(itemData) and itemData.get("loaded") is False:
                 self.refreshShotItemChildren(item)
 
     @err_catcher(name=__name__)
@@ -1574,13 +1574,7 @@ class EntityPage(QWidget):
             openex = QAction("Open in Explorer", self)
             openex.triggered.connect(lambda: self.core.openFolder(path))
             rcmenu.addAction(openex)
-            copAct = QAction("Copy", self)
-            iconPath = os.path.join(
-                self.core.prismRoot, "Scripts", "UserInterfacesPrism", "copy.png"
-            )
-            icon = self.core.media.getColoredIcon(iconPath)
-            copAct.setIcon(icon)
-            copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+            copAct = self.core.getCopyAction(path, parent=self)
             rcmenu.addAction(copAct)
             if addOmit:
                 rcmenu.addAction(oAct)
@@ -1597,13 +1591,7 @@ class EntityPage(QWidget):
             openex = QAction("Open in Explorer", self)
             openex.triggered.connect(lambda: self.core.openFolder(path))
             rcmenu.addAction(openex)
-            copAct = QAction("Copy", self)
-            iconPath = os.path.join(
-                self.core.prismRoot, "Scripts", "UserInterfacesPrism", "copy.png"
-            )
-            icon = self.core.media.getColoredIcon(iconPath)
-            copAct.setIcon(icon)
-            copAct.triggered.connect(lambda: self.core.copyToClipboard(path, file=True))
+            copAct = self.core.getCopyAction(path, parent=self)
             rcmenu.addAction(copAct)
 
         expAct = QAction("Expand all", self)
